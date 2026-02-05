@@ -135,8 +135,9 @@ pipeline {
                     // 加载质量检查共享库
                     def qualityChecks = load "${env.WORKSPACE}/quality-check.groovy"
                     
-                    // 获取选中的插件列表
-                    def selectedPlugins = env.PLUGINS_TO_BUILD ? env.PLUGINS_TO_BUILD.split(',').collect { it.trim() } : []
+                    // 获取选中的插件列表（参数名是 SELECTED_PLUGINS）
+                    def selectedPlugins = params.SELECTED_PLUGINS ? params.SELECTED_PLUGINS.split(',').collect { it.trim() } : []
+                    echo "检查的插件: ${selectedPlugins.join(', ')}"
                     
                     // 执行所有质量检查
                     def results = qualityChecks.runAllQualityChecks(env.YUEZHUO_DIR)
