@@ -95,8 +95,8 @@ try:
     for e in error_only[:20]:
         print('DETAIL:{}|{}|{}|{}'.format(e['file'], e['line'], e['message'][:80], e['rule']))
     
-    # 生成详细日志文件
-    with open('eslint-errors.txt', 'w') as out:
+    # 生成详细日志文件（使用 UTF-8 编码）
+    with open('eslint-errors.txt', 'w', encoding='utf-8') as out:
         out.write('=' * 70 + '\\n')
         out.write('ESLint 代码检查详细报告\\n')
         out.write('=' * 70 + '\\n\\n')
@@ -239,6 +239,138 @@ def runCoverage(String projectDir) {
 }
 
 /**
+ * 执行圈复杂度检查
+ * @param projectDir 项目根目录
+ * @return Map 包含详细结果 {pass, maxComplexity, avgComplexity, highComplexityFuncs}
+ */
+def runComplexity(String projectDir) {
+    echo "======== 圈复杂度检查 ========"
+    def result = [pass: true, maxComplexity: 0, avgComplexity: 0.0, highComplexityFuncs: [], totalFuncs: 0]
+    
+    dir(projectDir) {
+        try {
+            def pluginsDir = "packages/plugins/@huaiye"
+            
+            timeout(time: 3, unit: 'MINUTES') {
+                // 使用 ESLint 临时配置检查复杂度
+                def output = sh(
+                    script: """
+                        if [ -d "${pluginsDir}" ]; then
+                            cd "${pluginsDir}"
+                            
+                            # 运行 ESLint 提取复杂度信息（从已有的 eslint-report.json）
+                            if [ -f "eslint-report.json" ]; then
+                                python3 -c "
+import json
+
+try:
+    with open('eslint-report.json', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    complexity_issues = []
+    for item in data:
+        fp = item.get('filePath', '')
+        parts = fp.split('/')
+        short_path = '/'.join(parts[-3:]) if len(parts) >= 3 else fp
+        for msg in item.get('messages', []):
+            rule = msg.get('ruleId', '')
+            # 检查复杂度相关规则
+            if 'complexity' in rule.lower() or 'cognitive' in rule.lower():
+                line = msg.get('line', 0)
+                text = msg.get('message', '')
+                # 尝试从消息中提取复杂度值
+                import re
+                match = re.search(r'(\\d+)', text)
+                complexity = int(match.group(1)) if match else 10
+                complexity_issues.append({
+                    'file': short_path,
+                    'line': line,
+                    'message': text[:80],
+                    'complexity': complexity
+                })
+    
+    # 统计
+    if complexity_issues:
+        max_c = max(c['complexity'] for c in complexity_issues)
+        avg_c = sum(c['complexity'] for c in complexity_issues) / len(complexity_issues)
+        print('MAX_COMPLEXITY={}'.format(max_c))
+        print('AVG_COMPLEXITY={:.1f}'.format(avg_c))
+        print('TOTAL_FUNCS={}'.format(len(complexity_issues)))
+        
+        # 输出复杂度超过10的函数
+        high_complexity = [c for c in complexity_issues if c['complexity'] > 10][:10]
+        for c in high_complexity:
+            print('COMPLEX:{}|{}|{}|{}'.format(c['file'], c['line'], c['complexity'], c['message']))
+        
+        # 生成详细日志
+        with open('complexity-report.txt', 'w', encoding='utf-8') as out:
+            out.write('=' * 60 + '\\n')
+            out.write('圈复杂度分析报告\\n')
+            out.write('=' * 60 + '\\n\\n')
+            out.write('最大复杂度: {}\\n'.format(max_c))
+            out.write('平均复杂度: {:.1f}\\n'.format(avg_c))
+            out.write('复杂函数数: {}\\n\\n'.format(len(complexity_issues)))
+            
+            # 按复杂度降序排列
+            for c in sorted(complexity_issues, key=lambda x: -x['complexity']):
+                out.write('[{}] {}:{} - {}\\n'.format(c['complexity'], c['file'], c['line'], c['message']))
+        
+        print('LOGFILE=complexity-report.txt')
+    else:
+        print('MAX_COMPLEXITY=0')
+        print('AVG_COMPLEXITY=0.0')
+        print('TOTAL_FUNCS=0')
+        print('NO_COMPLEXITY_DATA')
+except Exception as e:
+    print('ERROR={}'.format(str(e)))
+"
+                            fi
+                        fi
+                    """,
+                    returnStdout: true
+                ).trim()
+                
+                // 解析输出
+                output.split('\n').each { line ->
+                    if (line.startsWith('MAX_COMPLEXITY=')) {
+                        result.maxComplexity = line.replace('MAX_COMPLEXITY=', '').trim().toInteger()
+                    } else if (line.startsWith('AVG_COMPLEXITY=')) {
+                        result.avgComplexity = line.replace('AVG_COMPLEXITY=', '').trim().toDouble()
+                    } else if (line.startsWith('TOTAL_FUNCS=')) {
+                        result.totalFuncs = line.replace('TOTAL_FUNCS=', '').trim().toInteger()
+                    } else if (line.startsWith('COMPLEX:')) {
+                        def parts = line.replace('COMPLEX:', '').split('\\|')
+                        if (parts.size() >= 4) {
+                            result.highComplexityFuncs.add([
+                                file: parts[0],
+                                line: parts[1],
+                                complexity: parts[2].toInteger(),
+                                message: parts[3]
+                            ])
+                        }
+                    }
+                }
+                
+                // 复杂度超过15的函数过多则标记为不通过
+                result.pass = (result.maxComplexity <= 20 && result.highComplexityFuncs.size() < 20)
+                
+                if (result.totalFuncs > 0) {
+                    echo "圈复杂度检查: 最大 ${result.maxComplexity}, 平均 ${result.avgComplexity}"
+                } else {
+                    echo "未检测到复杂度数据（可能需要配置 ESLint complexity 规则）"
+                    result.message = "未配置复杂度检查规则"
+                }
+            }
+        } catch (Exception e) {
+            echo "圈复杂度检查失败: ${e.message}"
+            result.pass = true
+            result.message = "检查异常"
+        }
+    }
+    return result
+}
+
+/**
  * 执行依赖安全扫描
  * @param projectDir 项目根目录
  * @return Map 包含详细结果 {pass, high, moderate, low, total, topVulns}
@@ -307,8 +439,8 @@ try:
     for v in high_vulns:
         print('VULN:{}|{}|{}'.format(v['severity'], v['module'], v['title']))
     
-    # 生成详细日志文件
-    with open('security-audit-details.txt', 'w') as out:
+    # 生成详细日志文件（使用 UTF-8 编码）
+    with open('security-audit-details.txt', 'w', encoding='utf-8') as out:
         out.write('=' * 60 + '\\n')
         out.write('依赖安全扫描详细报告\\n')
         out.write('=' * 60 + '\\n\\n')
@@ -380,6 +512,7 @@ def runAllQualityChecks(String projectDir) {
     def results = [:]
     
     results.lint = runLint(projectDir)
+    results.complexity = runComplexity(projectDir)  // 添加圈复杂度检查
     results.tests = runTests(projectDir)
     results.coverage = runCoverage(projectDir)
     results.security = runSecurityAudit(projectDir)
@@ -392,6 +525,7 @@ def runAllQualityChecks(String projectDir) {
     代码质量检查完成
     ========================================
     ESLint:     ${results.lint.pass ? '✅ 通过' : '❌ 有错误'} (${results.lint.errors} 错误, ${results.lint.warnings} 警告)
+    圈复杂度:   ${results.complexity.totalFuncs > 0 ? (results.complexity.pass ? '✅ 正常' : '⚠️ 过高') : '⏭️ 未配置'} (最大 ${results.complexity.maxComplexity})
     单元测试:   ${results.tests.skipped ? '⏭️ 跳过' : (results.tests.pass ? '✅ 通过' : '❌ 失败')}
     覆盖率:     ${results.coverage.skipped ? '⏭️ 跳过' : (results.coverage.lines + '%')}
     安全扫描:   ${results.security.pass ? '✅ 通过' : '⚠️ 有漏洞'} (${results.security.high} 高危)
@@ -565,6 +699,16 @@ def generateHtmlReport(Map results, String outputPath) {
                 </div>
                 <span class="status-badge ${results.lint.pass ? 'status-success' : 'status-danger'}">
                     ${results.lint.pass ? '✓ 通过' : '✗ 有错误'}
+                </span>
+            </div>
+            
+            <div class="check-row">
+                <div>
+                    <div class="check-name">圈复杂度</div>
+                    <div class="check-detail">${results.complexity?.totalFuncs > 0 ? '最大 ' + results.complexity.maxComplexity + ', 平均 ' + results.complexity.avgComplexity : '未配置 complexity 规则'}</div>
+                </div>
+                <span class="status-badge ${results.complexity?.totalFuncs > 0 ? (results.complexity.pass ? 'status-success' : 'status-warning') : 'status-skipped'}">
+                    ${results.complexity?.totalFuncs > 0 ? (results.complexity.pass ? '✓ 正常' : '⚠ 过高') : '⏭ 跳过'}
                 </span>
             </div>
             

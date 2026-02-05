@@ -429,11 +429,12 @@ pipeline {
                             cp -f ${env.YUEZHUO_DIR}/eslint-errors.txt ${env.WORKSPACE}/ 2>/dev/null || true
                             cp -f ${env.YUEZHUO_DIR}/security-audit-details.txt ${env.WORKSPACE}/ 2>/dev/null || true
                             cp -f ${env.YUEZHUO_DIR}/eslint-report.json ${env.WORKSPACE}/ 2>/dev/null || true
+                            cp -f ${env.YUEZHUO_DIR}/complexity-report.txt ${env.WORKSPACE}/ 2>/dev/null || true
                         """
                         
                         // 归档所有报告文件
                         archiveArtifacts(
-                            artifacts: 'quality-report.html, eslint-errors.txt, security-audit-details.txt, eslint-report.json',
+                            artifacts: 'quality-report.html, eslint-errors.txt, security-audit-details.txt, complexity-report.txt, eslint-report.json',
                             allowEmptyArchive: true,
                             fingerprint: true
                         )
