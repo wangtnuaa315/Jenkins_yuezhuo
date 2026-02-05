@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Scheme 3: Allure Report 效果模拟</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            background: #f5f5f5;
+            color: #333;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 60px;
+            background: #fff;
+            height: 100%;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 20px;
+        }
+
+        .sidebar-item {
+            width: 40px;
+            height: 40px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .sidebar-item.active {
+            background: #e1f5fe;
+            color: #03a9f4;
+        }
+
+        .sidebar-logo {
+            font-weight: 900;
+            color: #ffb74d;
+            font-size: 20px;
+            margin-bottom: 30px;
+        }
+
+        /* Content */
+        .content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .header {
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-weight: 300;
+            font-size: 24px;
+            color: #333;
+        }
+
+        /* Dashboard Layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .widget {
+            background: #fff;
+            border-radius: 3px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        .widget h3 {
+            margin-top: 0;
+            color: #333;
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 15px;
+        }
+
+        /* Mock Charts */
+        .chart-donut {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            background: conic-gradient(#97cc64 0% 83%, #fd5a3e 83% 100%);
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .chart-hole {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: #fff;
+            position: absolute;
+            top: 25px;
+            left: 25px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        .big-number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .label {
+            color: #999;
+            font-size: 12px;
+        }
+
+        .stat-list {
+            margin-top: 20px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .color-green {
+            color: #97cc64;
+            font-weight: bold;
+        }
+
+        .color-red {
+            color: #fd5a3e;
+            font-weight: bold;
+        }
+
+        .timeline-bar {
+            height: 10px;
+            width: 100%;
+            background: #eee;
+            border-radius: 5px;
+            margin-top: 10px;
+            overflow: hidden;
+            display: flex;
+        }
+
+        .seg {
+            height: 100%;
+        }
+
+        /* Suite List Mock */
+        .suite-item {
+            border-bottom: 1px solid #eee;
+            padding: 10px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .status-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .suite-name {
+            flex: 1;
+        }
+
+        .suite-time {
+            color: #999;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <div class="sidebar-logo">A</div>
+        <div class="sidebar-item active">📊</div> <!-- Overview -->
+        <div class="sidebar-item">📑</div> <!-- Categories -->
+        <div class="sidebar-item">📦</div> <!-- Suites -->
+        <div class="sidebar-item">📈</div> <!-- Graphs -->
+    </div>
+
+    <div class="content">
+        <div class="header">
+            <h1>Allure Report #88</h1>
+        </div>
+
+        <div class="dashboard-grid">
+            <!-- Launch Statistics -->
+            <div class="widget">
+                <h3>Launch</h3>
+                <div style="display: flex;">
+                    <div style="flex: 1;">
+                        <div class="chart-donut">
+                            <div class="chart-hole">
+                                <span class="big-number">83%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="flex: 1; padding-left: 20px;">
+                        <div class="stat-list">
+                            <div class="stat-item"><span>Total</span> <span>12</span></div>
+                            <div class="stat-item"><span class="color-green">Passed</span> <span>10</span></div>
+                            <div class="stat-item"><span class="color-red">Failed</span> <span>2</span></div>
+                            <div class="stat-item"><span>Broken</span> <span>0</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trend Mock -->
+            <div class="widget">
+                <h3>Trend</h3>
+                <div
+                    style="height: 150px; display: flex; align-items: flex-end; justify-content: space-between; padding-top: 20px;">
+                    <div style="width: 10%; background: #e0e0e0; height: 40%;"></div>
+                    <div style="width: 10%; background: #97cc64; height: 60%;"></div>
+                    <div style="width: 10%; background: #97cc64; height: 90%;"></div>
+                    <div style="width: 10%; background: #97cc64; height: 80%;"></div>
+                    <div style="width: 10%; background: #fd5a3e; height: 30%;"></div> <!-- Failed recently -->
+                </div>
+            </div>
+
+            <!-- Suites -->
+            <div class="widget">
+                <h3>Suites</h3>
+                <div class="suite-list">
+                    <div class="suite-item">
+                        <div class="status-icon" style="background: #97cc64;"></div>
+                        <div class="suite-name">@huaiye/plugin-core</div>
+                        <div class="suite-time">45s</div>
+                    </div>
+                    <div class="suite-item">
+                        <div class="status-icon" style="background: #fd5a3e;"></div>
+                        <div class="suite-name">@huaiye/plugin-video-analysis</div>
+                        <div class="suite-time">12s</div>
+                    </div>
+                    <div class="suite-item">
+                        <div class="status-icon" style="background: #97cc64;"></div>
+                        <div class="suite-name">@huaiye/plugin-map</div>
+                        <div class="suite-time">28s</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="widget">
+                <h3>Environment</h3>
+                <div class="stat-list">
+                    <div class="stat-item"><span>Node.js</span> <span>v16.14.0</span></div>
+                    <div class="stat-item"><span>Branch</span> <span>master</span></div>
+                    <div class="stat-item"><span>Commit</span> <span>a1b2c3d</span></div>
+                </div>
+            </div>
+        </div>
+
+        <br>
+        <p style="color: #999; font-style: italic;">(这是一个静态模拟页面，展示 Allure Report 在 Jenkins
+            中的视觉风格。实际报告具有完整的交互功能，如点击查看详情、过滤、搜索等。)</p>
+    </div>
+</body>
+
+</html>

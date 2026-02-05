@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Scheme 2: Jenkins UI 效果模拟</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            background: #fff;
+            color: #333;
+        }
+
+        /* Jenkins Top Bar */
+        .framework-top-bar {
+            background: #000;
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        .logo {
+            font-weight: bold;
+            font-size: 18px;
+            margin-right: 20px;
+        }
+
+        /* Layout */
+        .layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 240px;
+            background: #f0f0f0;
+            padding: 20px;
+            border-right: 1px solid #ddd;
+        }
+
+        .task-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .task-list li {
+            padding: 8px 0;
+            color: #4d5d73;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .build-history {
+            margin-top: 30px;
+        }
+
+        .build-history h3 {
+            font-size: 14px;
+            text-transform: uppercase;
+            color: #4d5d73;
+        }
+
+        .build-row {
+            display: flex;
+            align-items: center;
+            padding: 5px 0;
+            font-size: 13px;
+        }
+
+        .build-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .status-blue {
+            background: #3b82f6;
+        }
+
+        .status-red {
+            background: #ef4444;
+        }
+
+        /* Groovy Script Badge Effect */
+        .badge {
+            background: black;
+            color: white;
+            padding: 0 4px;
+            border-radius: 3px;
+            font-size: 10px;
+            margin-left: 5px;
+            border: 1px solid white;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Main Content */
+        .main {
+            flex: 1;
+            padding: 40px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+        }
+
+        /* Groovy Summary Box Effect */
+        .summary-box {
+            border: 1px solid #ddd;
+            background: #fff;
+            padding: 10px;
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .summary-icon img {
+            width: 48px;
+            height: 48px;
+        }
+
+        .summary-content {
+            font-size: 14px;
+        }
+
+        .summary-content h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+
+        .summary-content ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .summary-content li {
+            margin-bottom: 5px;
+        }
+
+        .description {
+            font-style: italic;
+            color: #666;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="framework-top-bar">
+        <div class="logo">Jenkins</div>
+        <div>Dashboard &gt; Yuezhuo Plugin Auto-Build</div>
+    </div>
+
+    <div class="layout">
+        <div class="sidebar">
+            <ul class="task-list">
+                <li>Back to Project</li>
+                <li>Status</li>
+                <li>Changes</li>
+                <li>Console Output</li>
+            </ul>
+
+            <div class="build-history">
+                <h3>Build History</h3>
+                <!-- Effect 1: Badge in Sidebar -->
+                <div class="build-row">
+                    <span class="build-icon status-blue"></span>
+                    #88
+                    <span class="badge">✅</span> <!-- 这是脚本添加的 badge -->
+                    <span style="color: #666; margin-left: auto;">Feb 02</span>
+                </div>
+                <div class="build-row">
+                    <span class="build-icon status-red"></span>
+                    #87
+                    <span class="badge">❌</span> <!-- 这是脚本添加的 badge -->
+                    <span style="color: #666; margin-left: auto;">Feb 01</span>
+                </div>
+                <div class="build-row">
+                    <span class="build-icon status-blue"></span>
+                    #86
+                    <span class="badge">✅</span>
+                    <span style="color: #666; margin-left: auto;">Feb 01</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="main">
+            <h1>Build #88 (Feb 02, 2026 2:30 PM)</h1>
+
+            <!-- Effect 3: Modified Description -->
+            <div class="description">
+                这是构建的描述信息 [Plugins: 10/12]
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid #eee;">
+
+            <h3>构建结果摘要 (Groovy Postbuild 效果)</h3>
+
+            <!-- Effect 2: Summary Box -->
+            <div class="summary-box">
+                <div class="summary-icon">
+                    <!-- Jenkins default graph icon placeholder -->
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2">
+                        <rect x="2" y="2" width="20" height="20" rx="2"></rect>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <line x1="12" y1="2" x2="12" y2="22"></line>
+                    </svg>
+                </div>
+                <div class="summary-content">
+                    <!-- Content injected by the Groovy script -->
+                    <h3>🔌 插件编译统计</h3>
+                    <ul style='list-style: none; padding: 0;'>
+                        <li>✅ 成功: <b>10</b></li>
+                        <li>❌ 失败: <b style='color: red;'>2</b></li>
+                        <li>⚠️ 失败列表: @huaiye/plugin-video, @huaiye/plugin-map</li>
+                    </ul>
+                </div>
+            </div>
+
+            <br>
+            <p><i>(上图演示了 scheme2_build_summary.groovy 脚本在 Jenkins 界面中产生的 3 处视觉效果：侧边栏徽章、构建描述修改、以及主区域的摘要框)</i></p>
+        </div>
+    </div>
+</body>
+
+</html>

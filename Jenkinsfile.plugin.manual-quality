@@ -1,0 +1,458 @@
+/**
+ * ============================================================================
+ * Yuezhuo 插件打包 + 质量检查任务（实验版）
+ * ============================================================================
+ * 
+ * 【功能说明】
+ * - 基于 manual-build 任务
+ * - 新增代码质量检查功能
+ * - 生成 HTML 质量报告
+ * 
+ * 【维护信息】
+ * 创建时间：2026-02-03
+ * ============================================================================
+ */
+
+import groovy.json.JsonSlurper
+
+pipeline {
+    agent any
+
+    parameters {
+        // 插件复选框 - 动态读取目录
+        activeChoice(
+            name: 'SELECTED_PLUGINS',
+            description: '选择要打包的插件（可多选）',
+            choiceType: 'PT_CHECKBOX',
+            filterable: true,
+            script: [
+                $class: 'GroovyScript',
+                script: [
+                    sandbox: false,
+                    script: '''
+                        def pluginsDir = new File("/mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins/@huaiye")
+                        if (pluginsDir.exists()) {
+                            def plugins = pluginsDir.listFiles()
+                                .findAll { it.isDirectory() }
+                                .collect { it.name }
+                                .sort()
+                            return plugins
+                        }
+                        return ["插件目录不存在，请先运行主工程构建"]
+                    '''
+                ],
+                fallbackScript: [
+                    sandbox: false,
+                    script: 'return ["plugin-message-queue"]'
+                ]
+            ]
+        )
+        
+        string(
+            name: 'PLUGINS_REPO',
+            defaultValue: 'http://192.168.1.6:9000/innovation/yuezhuo-plugins.git',
+            description: '插件仓库地址'
+        )
+        string(
+            name: 'PLUGINS_BRANCH',
+            defaultValue: 'master',
+            description: '插件仓库分支'
+        )
+        booleanParam(
+            name: 'UPDATE_PLUGINS_REPO',
+            defaultValue: true,
+            description: '更新插件仓库代码'
+        )
+        booleanParam(
+            name: 'BUILD_ALL',
+            defaultValue: false,
+            description: '忽略复选框，打包所有插件'
+        )
+        booleanParam(
+            name: 'RUN_QUALITY_CHECK',
+            defaultValue: true,
+            description: '执行代码质量检查（ESLint、单元测试、覆盖率、安全扫描）'
+        )
+        booleanParam(
+            name: 'SKIP_BUILD',
+            defaultValue: false,
+            description: '跳过构建打包（仅执行质量检查）'
+        )
+        string(
+            name: 'EMAIL_RECIPIENTS',
+            defaultValue: 'wangting@huaiye.com.cn',
+            description: '邮件通知收件人（多个收件人用逗号分隔）'
+        )
+    }
+
+    environment {
+        SHARED_WORKSPACE = '/mnt/sdb3/yuezhuo-workspace'
+        YUEZHUO_DIR = "${SHARED_WORKSPACE}/yuezhuo"
+        PLUGINS_DIR = "${SHARED_WORKSPACE}/yuezhuo-plugins"
+        ARTIFACTS_DIR = '/mnt/sdb3/Jenkins_Yuezhuo'
+        GIT_CREDENTIALS = 'yuezhuo-git-credentials'
+    }
+
+    stages {
+        stage('环境检查') {
+            steps {
+                script {
+                    sh '''
+                        echo "======== 环境信息 ========"
+                        echo "Node.js 版本: $(node -v)"
+                        echo "Yarn 版本: $(yarn -v)"
+                        echo "共享工作目录: ${SHARED_WORKSPACE}"
+                        echo "========================="
+                    '''
+                }
+            }
+        }
+
+        stage('检查主工程') {
+            steps {
+                script {
+                    def buildMarker = "${env.YUEZHUO_DIR}/.build_complete"
+                    def markerExists = sh(script: "test -f ${buildMarker} && echo 'yes' || echo 'no'", returnStdout: true).trim()
+                    
+                    if (markerExists == 'no') {
+                        error "主工程尚未构建！请先运行 yuezhuo-main-build 任务。"
+                    }
+                    
+                    echo "主工程已构建，继续..."
+                    sh "cat ${buildMarker}"
+                }
+            }
+        }
+
+        stage('代码质量检查') {
+            when {
+                expression { params.RUN_QUALITY_CHECK == true }
+            }
+            steps {
+                script {
+                    echo "======== 开始代码质量检查 ========"
+                    
+                    // 加载质量检查共享库
+                    def qualityChecks = load "${env.WORKSPACE}/quality-check.groovy"
+                    
+                    // 获取选中的插件列表
+                    def selectedPlugins = env.PLUGINS_TO_BUILD ? env.PLUGINS_TO_BUILD.split(',').collect { it.trim() } : []
+                    
+                    // 执行所有质量检查
+                    def results = qualityChecks.runAllQualityChecks(env.YUEZHUO_DIR)
+                    
+                    // 添加插件信息到结果
+                    results.plugins = selectedPlugins
+                    
+                    // 保存结果到环境变量（使用新的结构）
+                    env.QUALITY_LINT = results.lint.pass ? 'PASS' : 'FAIL'
+                    env.QUALITY_TESTS = results.tests.pass ? 'PASS' : 'SKIP'
+                    env.QUALITY_COVERAGE = results.coverage.pass ? 'PASS' : 'SKIP'
+                    env.QUALITY_SECURITY = results.security.pass ? 'PASS' : 'WARN'
+                    
+                    // 保存详细结果到 JSON 字符串
+                    env.QUALITY_RESULTS = groovy.json.JsonOutput.toJson(results)
+                    
+                    // 生成 HTML 报告
+                    qualityChecks.generateHtmlReport(results, "${env.WORKSPACE}/quality-report.html")
+                    
+                    echo "======== 代码质量检查完成 ========"
+                }
+            }
+        }
+
+        stage('更新插件仓库') {
+            when {
+                expression { params.UPDATE_PLUGINS_REPO == true && params.SKIP_BUILD == false }
+            }
+            steps {
+                script {
+                    sh "mkdir -p ${PLUGINS_DIR}"
+                    
+                    dir(env.PLUGINS_DIR) {
+                        echo "更新插件仓库..."
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: "*/${params.PLUGINS_BRANCH}"]],
+                            extensions: [],
+                            userRemoteConfigs: [[
+                                url: params.PLUGINS_REPO,
+                                credentialsId: env.GIT_CREDENTIALS
+                            ]]
+                        ])
+                        
+                        env.PLUGINS_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        echo "插件仓库 Commit: ${env.PLUGINS_COMMIT}"
+                    }
+                }
+            }
+        }
+
+        stage('确定打包插件') {
+            when {
+                expression { params.SKIP_BUILD == false }
+            }
+            steps {
+                script {
+                    def pluginList = []
+                    
+                    if (params.BUILD_ALL) {
+                        def plugins = sh(
+                            script: "ls -1 ${PLUGINS_DIR}/@huaiye/ 2>/dev/null | sort",
+                            returnStdout: true
+                        ).trim()
+                        pluginList = plugins.split('\n').toList()
+                        echo "打包所有插件: ${pluginList.size()} 个"
+                    } else {
+                        def selected = params.SELECTED_PLUGINS
+                        if (selected) {
+                            pluginList = selected.split(',').collect { it.trim() }.findAll { it }
+                        }
+                        
+                        if (pluginList.isEmpty()) {
+                            error "请至少选择一个插件或勾选\"打包所有插件\""
+                        }
+                        echo "选中插件: ${pluginList.join(', ')}"
+                    }
+                    
+                    env.PLUGIN_LIST = pluginList.join('\n')
+                    env.PLUGIN_COUNT = pluginList.size().toString()
+                }
+            }
+        }
+
+        stage('拷贝插件到主项目') {
+            when {
+                expression { params.SKIP_BUILD == false }
+            }
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    
+                    sh """
+                        echo "确保插件目录存在..."
+                        mkdir -p ${YUEZHUO_DIR}/packages/plugins/@huaiye
+                    """
+                    
+                    echo "======== 拷贝用户选择的插件 ========"
+                    for (plugin in plugins) {
+                        plugin = plugin.trim()
+                        if (!plugin) continue
+                        
+                        sh """
+                            echo "拷贝: ${plugin}"
+                            rm -rf ${YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}
+                            cp -r ${PLUGINS_DIR}/@huaiye/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
+                        """
+                    }
+                    
+                    echo "插件拷贝完成"
+                }
+            }
+        }
+
+        stage('校验插件配置') {
+            when {
+                expression { params.SKIP_BUILD == false }
+            }
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    def invalidPlugins = []
+                    
+                    echo "======== 校验插件 package.json 配置（非空校验）========"
+                    
+                    for (plugin in plugins) {
+                        plugin = plugin.trim()
+                        if (!plugin) continue
+                        
+                        def packageJsonPath = "${env.YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}/package.json"
+                        def exists = sh(script: "test -f ${packageJsonPath} && echo 'yes' || echo 'no'", returnStdout: true).trim()
+                        
+                        if (exists == 'yes') {
+                            // 使用 jq 检查 huaiye 字段及其子字段是否存在且非空
+                            def validationResult = sh(
+                                script: """
+                                    cd ${env.YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}
+                                    if jq -e '.huaiye | select(.logo != null and .logo != "" and .title != null and .title != "" and .title.zh-CN != null and .title.zh-CN != "")' package.json > /dev/null 2>&1; then
+                                        echo "valid"
+                                    else
+                                        echo "invalid"
+                                    fi
+                                """,
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (validationResult == 'valid') {
+                                echo "✅ ${plugin}: 配置正确"
+                            } else {
+                                // 获取详细的错误信息
+                                def missingFields = []
+                                
+                                def fields = [
+                                    [name: 'huaiye', path: '.huaiye'],
+                                    [name: 'huaiye.logo', path: '.huaiye.logo'],
+                                    [name: 'huaiye.title', path: '.huaiye.title'],
+                                    [name: 'huaiye.title.zh-CN', path: '.huaiye.title["zh-CN"]']
+                                ]
+                                
+                                def hasHuaiye = sh(script: "jq -e '.huaiye' ${packageJsonPath} > /dev/null 2>&1 && echo 'yes' || echo 'no'", returnStdout: true).trim()
+                                
+                                if (hasHuaiye == 'no') {
+                                    invalidPlugins.add("${plugin} (缺少 huaiye 字段)")
+                                    echo "❌ ${plugin}: 缺少 huaiye 字段"
+                                } else {
+                                    invalidPlugins.add("${plugin} (huaiye 字段不完整)")
+                                    echo "⚠️ ${plugin}: huaiye 字段不完整"
+                                }
+                            }
+                        } else {
+                            invalidPlugins.add("${plugin} (package.json 不存在)")
+                            echo "❌ ${plugin}: package.json 不存在"
+                        }
+                    }
+                    
+                    if (invalidPlugins.size() > 0) {
+                        echo "======== 配置校验警告 ========"
+                        echo "以下插件可能存在配置问题: ${invalidPlugins.join(', ')}"
+                        echo "建议检查这些插件的 package.json 中的 huaiye 字段配置"
+                    } else {
+                        echo "✅ 所有插件配置校验通过"
+                    }
+                }
+            }
+        }
+
+        stage('重新安装依赖') {
+            when {
+                expression { params.SKIP_BUILD == false }
+            }
+            steps {
+                dir(env.YUEZHUO_DIR) {
+                    sh '''
+                        echo "======== 重新安装依赖 ========"
+                        yarn install --frozen-lockfile || yarn install
+                        echo "依赖安装完成"
+                    '''
+                }
+            }
+        }
+
+        stage('构建打包') {
+            when {
+                expression { params.SKIP_BUILD == false }
+            }
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    def successCount = 0
+                    def failedPlugins = []
+                    def buildTimestamp = new Date().format('yyyyMMdd.HHmmss')
+                    
+                    dir(env.YUEZHUO_DIR) {
+                        sh """
+                            echo "清理旧的 tar 制品..."
+                            rm -rf storage/tar/@huaiye
+                            mkdir -p storage/tar/@huaiye
+                        """
+                        
+                        for (plugin in plugins) {
+                            plugin = plugin.trim()
+                            if (!plugin) continue
+                            
+                            def fullName = "@huaiye/${plugin}"
+                            def pluginPath = "packages/plugins/@huaiye/${plugin}"
+                            echo "======== 开始处理: ${fullName} ========"
+                            
+                            try {
+                                sh """
+                                    cd ${pluginPath}
+                                    current_version=\$(cat package.json | grep '"version"' | head -1 | sed 's/.*"version": "\\([^"]*\\)".*/\\1/')
+                                    echo "当前版本: \$current_version"
+                                    new_version="\${current_version}.${buildTimestamp}"
+                                    echo "新版本: \$new_version"
+                                    sed -i "s/\\"version\\": \\"[^\\"]*\\"/\\"version\\": \\"\$new_version\\"/" package.json
+                                    grep '"version"' package.json
+                                """
+                                
+                                sh "yarn pm create ${fullName} || true"
+                                sh "yarn build ${fullName} --no-dts"
+                                sh "yarn nocobase tar ${fullName}"
+                                
+                                successCount++
+                                echo "✅ ${fullName} 打包成功"
+                            } catch (Exception e) {
+                                failedPlugins.add(plugin)
+                                echo "❌ ${fullName} 打包失败: ${e.message}"
+                            }
+                        }
+                    }
+                    
+                    env.SUCCESS_COUNT = successCount.toString()
+                    env.FAILED_PLUGINS = failedPlugins.join(',')
+                    
+                    echo "======== 构建结果 ========"
+                    echo "成功: ${successCount} 个"
+                    echo "失败: ${failedPlugins.size()} 个"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ========================================
+            ✅ 任务执行成功！
+            ========================================
+            质量检查: ${params.RUN_QUALITY_CHECK ? '已执行' : '跳过'}
+            构建打包: ${params.SKIP_BUILD ? '跳过' : '已执行'}
+            ========================================
+            """
+        }
+        failure {
+            echo """
+            ========================================
+            ❌ 任务执行失败！
+            ========================================
+            请检查控制台日志获取详细错误信息。
+            ========================================
+            """
+        }
+        always {
+            script {
+                // 保存质量报告（不需要 HTML Publisher 插件）
+                if (params.RUN_QUALITY_CHECK) {
+                    try {
+                        // 复制日志文件到工作区
+                        sh """
+                            cp -f ${env.YUEZHUO_DIR}/eslint-errors.txt ${env.WORKSPACE}/ 2>/dev/null || true
+                            cp -f ${env.YUEZHUO_DIR}/security-audit-details.txt ${env.WORKSPACE}/ 2>/dev/null || true
+                            cp -f ${env.YUEZHUO_DIR}/eslint-report.json ${env.WORKSPACE}/ 2>/dev/null || true
+                        """
+                        
+                        // 归档所有报告文件
+                        archiveArtifacts(
+                            artifacts: 'quality-report.html, eslint-errors.txt, security-audit-details.txt, eslint-report.json',
+                            allowEmptyArchive: true,
+                            fingerprint: true
+                        )
+                        echo "质量报告和详细日志已保存到构建制品中"
+                    } catch (Exception e) {
+                        echo "质量报告保存失败: ${e.message}"
+                    }
+                    
+                    // 发送邮件
+                    try {
+                        def qualityChecks = load "${env.WORKSPACE}/quality-check.groovy"
+                        // 从 JSON 字符串解析结果
+                        def results = new groovy.json.JsonSlurper().parseText(env.QUALITY_RESULTS)
+                        qualityChecks.sendEmailReport(results, "${env.WORKSPACE}/quality-report.html", params.EMAIL_RECIPIENTS)
+                    } catch (Exception e) {
+                        echo "邮件发送失败: ${e.message}"
+                    }
+                }
+            }
+        }
+    }
+}

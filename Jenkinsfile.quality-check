@@ -1,0 +1,147 @@
+/**
+ * ============================================================================
+ * Yuezhuo 代码质量检查任务（手动触发）
+ * ============================================================================
+ * 
+ * 【功能说明】
+ * - 手动触发的代码质量检查任务
+ * - 执行 ESLint、单元测试、覆盖率、安全扫描
+ * - 生成精美的 HTML 质量报告
+ * 
+ * 【所需 Jenkins 插件】
+ * - Warnings Next Generation Plugin
+ * - Coverage Plugin 或 Cobertura Plugin
+ * - HTML Publisher Plugin
+ * 
+ * 【维护信息】
+ * 创建时间：2026-02-03
+ * ============================================================================
+ */
+
+pipeline {
+    agent any
+
+    parameters {
+        choice(
+            name: 'CHECK_TYPE',
+            choices: ['all', 'lint', 'test', 'coverage', 'security'],
+            description: '选择要执行的检查类型'
+        )
+    }
+
+    environment {
+        SHARED_WORKSPACE = '/mnt/sdb3/yuezhuo-workspace'
+        YUEZHUO_DIR = "${SHARED_WORKSPACE}/yuezhuo"
+    }
+
+    stages {
+        stage('环境检查') {
+            steps {
+                script {
+                    sh '''
+                        echo "======== 环境信息 ========"
+                        echo "Node.js: $(node -v)"
+                        echo "Yarn: $(yarn -v)"
+                        echo "项目目录: ${YUEZHUO_DIR}"
+                        echo "========================="
+                    '''
+                }
+            }
+        }
+
+        stage('检查主工程') {
+            steps {
+                script {
+                    def buildComplete = sh(
+                        script: "test -d ${YUEZHUO_DIR} && echo 'yes' || echo 'no'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (buildComplete == 'no') {
+                        error "主工程目录不存在！请先运行 yuezhuo-main-build 任务。"
+                    }
+                    
+                    echo "主工程目录存在，继续..."
+                }
+            }
+        }
+
+        stage('代码质量检查') {
+            steps {
+                script {
+                    // 加载共享库
+                    def qualityChecks = load "${YUEZHUO_DIR}/quality-check.groovy"
+                    
+                    def results = [:]
+                    
+                    switch(params.CHECK_TYPE) {
+                        case 'all':
+                            results = qualityChecks.runAllQualityChecks(env.YUEZHUO_DIR)
+                            break
+                        case 'lint':
+                            results.lint = qualityChecks.runLint(env.YUEZHUO_DIR)
+                            break
+                        case 'test':
+                            results.tests = qualityChecks.runTests(env.YUEZHUO_DIR)
+                            break
+                        case 'coverage':
+                            results.coverage = qualityChecks.runCoverage(env.YUEZHUO_DIR)
+                            break
+                        case 'security':
+                            results.security = qualityChecks.runSecurityAudit(env.YUEZHUO_DIR)
+                            break
+                    }
+                    
+                    // 保存结果供后续使用
+                    env.CHECK_RESULTS = results.toString()
+                    
+                    // 生成 HTML 报告
+                    qualityChecks.generateHtmlReport(env.YUEZHUO_DIR, results, "${env.YUEZHUO_DIR}/quality-report.html")
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                // 发布 HTML 报告
+                publishHTML(target: [
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: env.YUEZHUO_DIR,
+                    reportFiles: 'quality-report.html',
+                    reportName: '代码质量报告'
+                ])
+                
+                // 尝试发布其他报告
+                try {
+                    def qualityChecks = load "${YUEZHUO_DIR}/quality-check.groovy"
+                    qualityChecks.publishReports(env.YUEZHUO_DIR)
+                } catch (Exception e) {
+                    echo "部分报告发布失败: ${e.message}"
+                }
+            }
+        }
+        success {
+            echo """
+            ========================================
+            ✅ 代码质量检查完成！
+            ========================================
+            检查类型: ${params.CHECK_TYPE}
+            查看报告: 点击左侧 '代码质量报告' 链接
+            ========================================
+            """
+        }
+        failure {
+            echo """
+            ========================================
+            ❌ 代码质量检查失败！
+            ========================================
+            请检查控制台日志获取详细错误信息。
+            ========================================
+            """
+        }
+    }
+}

@@ -1,0 +1,479 @@
+/**
+ * ============================================================================
+ * Yuezhuo 插件打包任务
+ * ============================================================================
+ * 
+ * 【功能说明】
+ * - 从复选框选择要打包的插件
+ * - 支持选择多个插件同时打包
+ * - 支持一键打包所有插件
+ * - 自动追加时间戳到版本号
+ * - 归档 .tgz 文件到数据盘
+ * 
+ * 【依赖关系】
+ * - 依赖：yuezhuo-main-build（必须先构建主工程）
+ * - 如主工程未构建，任务会报错提示
+ * 
+ * 【运行频率】
+ * - 日常打包，可频繁运行
+ * 
+ * 【制品输出】
+ * /mnt/sdb3/Jenkins_Yuezhuo/
+ * 
+ * 【维护信息】
+ * 创建时间：2026-01-16
+ * 依赖插件：Active Choices
+ * ============================================================================
+ */
+
+import groovy.json.JsonSlurper
+
+pipeline {
+    agent any
+
+    parameters {
+        // 插件复选框 - 动态读取目录
+        activeChoice(
+            name: 'SELECTED_PLUGINS',
+            description: '选择要打包的插件（可多选）',
+            choiceType: 'PT_CHECKBOX',
+            filterable: true,
+            script: [
+                $class: 'GroovyScript',
+                script: [
+                    sandbox: false,
+                    script: '''
+                        def pluginsDir = new File("/mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins/@huaiye")
+                        if (pluginsDir.exists()) {
+                            def plugins = pluginsDir.listFiles()
+                                .findAll { it.isDirectory() }
+                                .collect { it.name }
+                                .sort()
+                            return plugins
+                        }
+                        return ["插件目录不存在，请先运行主工程构建"]
+                    '''
+                ],
+                fallbackScript: [
+                    sandbox: false,
+                    script: 'return ["plugin-message-queue"]'
+                ]
+            ]
+        )
+        
+        string(
+            name: 'PLUGINS_REPO',
+            defaultValue: 'http://192.168.1.6:9000/innovation/yuezhuo-plugins.git',
+            description: '插件仓库地址'
+        )
+        string(
+            name: 'PLUGINS_BRANCH',
+            defaultValue: 'master',
+            description: '插件仓库分支'
+        )
+        booleanParam(
+            name: 'UPDATE_PLUGINS_REPO',
+            defaultValue: true,
+            description: '更新插件仓库代码'
+        )
+        booleanParam(
+            name: 'BUILD_ALL',
+            defaultValue: false,
+            description: '忽略复选框，打包所有插件'
+        )
+    }
+
+    environment {
+        // 共享工作目录
+        SHARED_WORKSPACE = '/mnt/sdb3/yuezhuo-workspace'
+        YUEZHUO_DIR = "${SHARED_WORKSPACE}/yuezhuo"
+        PLUGINS_DIR = "${SHARED_WORKSPACE}/yuezhuo-plugins"
+        ARTIFACTS_DIR = '/mnt/sdb3/Jenkins_Yuezhuo'
+        // Git 凭证 ID
+        GIT_CREDENTIALS = 'yuezhuo-git-credentials'
+    }
+
+    stages {
+        stage('环境检查') {
+            steps {
+                script {
+                    sh '''
+                        echo "======== 环境信息 ========"
+                        echo "Node.js 版本: $(node -v)"
+                        echo "Yarn 版本: $(yarn -v)"
+                        echo "共享工作目录: ${SHARED_WORKSPACE}"
+                        echo "========================="
+                    '''
+                }
+            }
+        }
+
+        stage('检查主工程') {
+            steps {
+                script {
+                    def buildMarker = "${env.YUEZHUO_DIR}/.build_complete"
+                    def markerExists = sh(script: "test -f ${buildMarker} && echo 'yes' || echo 'no'", returnStdout: true).trim()
+                    
+                    if (markerExists == 'no') {
+                        error "主工程尚未构建！请先运行 yuezhuo-main-build 任务。"
+                    }
+                    
+                    echo "主工程已构建，继续..."
+                    sh "cat ${buildMarker}"
+                }
+            }
+        }
+
+        stage('更新插件仓库') {
+            when {
+                expression { params.UPDATE_PLUGINS_REPO == true }
+            }
+            steps {
+                script {
+                    sh "mkdir -p ${PLUGINS_DIR}"
+                    
+                    dir(env.PLUGINS_DIR) {
+                        echo "更新插件仓库..."
+                        // 使用 checkout 确保凭证正确传递
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: "*/${params.PLUGINS_BRANCH}"]],
+                            extensions: [],
+                            userRemoteConfigs: [[
+                                url: params.PLUGINS_REPO,
+                                credentialsId: env.GIT_CREDENTIALS
+                            ]]
+                        ])
+                        
+                        env.PLUGINS_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        echo "插件仓库 Commit: ${env.PLUGINS_COMMIT}"
+                    }
+                }
+            }
+        }
+
+        stage('确定打包插件') {
+            steps {
+                script {
+                    def pluginList = []
+                    
+                    if (params.BUILD_ALL) {
+                        // 打包所有插件
+                        def plugins = sh(
+                            script: "ls -1 ${PLUGINS_DIR}/@huaiye/ 2>/dev/null | sort",
+                            returnStdout: true
+                        ).trim()
+                        pluginList = plugins.split('\n').toList()
+                        echo "打包所有插件: ${pluginList.size()} 个"
+                    } else {
+                        // 使用复选框选择的插件
+                        def selected = params.SELECTED_PLUGINS
+                        if (selected) {
+                            pluginList = selected.split(',').collect { it.trim() }.findAll { it }
+                        }
+                        
+                        if (pluginList.isEmpty()) {
+                            error "请至少选择一个插件或勾选\"打包所有插件\""
+                        }
+                        echo "选中插件: ${pluginList.join(', ')}"
+                    }
+                    
+                    env.PLUGIN_LIST = pluginList.join('\n')
+                    env.PLUGIN_COUNT = pluginList.size().toString()
+                }
+            }
+        }
+
+        stage('拷贝插件到主项目') {
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    
+                    // 确保目录存在（不清空，保留主工程自带的插件如 plugin-license-manager）
+                    sh """
+                        echo "确保插件目录存在..."
+                        mkdir -p ${YUEZHUO_DIR}/packages/plugins/@huaiye
+                    """
+                    
+                    // 拷贝用户选择的插件（先删除旧版本再拷贝新版本）
+                    echo "======== 拷贝用户选择的插件 ========"
+                    for (plugin in plugins) {
+                        plugin = plugin.trim()
+                        if (!plugin) continue
+                        
+                        sh """
+                            echo "拷贝: ${plugin}"
+                            rm -rf ${YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}
+                            cp -r ${PLUGINS_DIR}/@huaiye/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
+                        """
+                    }
+                    
+                    echo "插件拷贝完成"
+                }
+            }
+        }
+        
+        stage('校验插件配置') {
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    def invalidPlugins = []
+                    
+                    echo "======== 校验插件 package.json 配置（非空校验）========"
+                    
+                    for (plugin in plugins) {
+                        plugin = plugin.trim()
+                        if (!plugin) continue
+                        
+                        def packageJsonPath = "${env.YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}/package.json"
+                        def exists = sh(script: "test -f ${packageJsonPath} && echo 'yes' || echo 'no'", returnStdout: true).trim()
+                        
+                        if (exists == 'yes') {
+                            // 使用 jq 检查 huaiye 字段及其子字段是否存在且非空
+                            def validationResult = sh(
+                                script: """
+                                    jq -e '
+                                        .huaiye != null and
+                                        (.huaiye.pluginCode | type == "string" and length > 0) and
+                                        (.huaiye.mgmtCategory | type == "string" and length > 0) and
+                                        (.huaiye.userCategory | type == "array" and length > 0) and
+                                        (.huaiye.func | type == "string" and length > 0) and
+                                        (.huaiye.owner | type == "string" and length > 0) and
+                                        (.huaiye.lifecycle | type == "string" and length > 0)
+                                    ' ${packageJsonPath} > /dev/null 2>&1 && echo 'valid' || echo 'invalid'
+                                """,
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (validationResult == 'valid') {
+                                echo "✅ ${plugin}: 配置正确"
+                            } else {
+                                // 获取详细的错误信息
+                                def missingFields = []
+                                
+                                def fields = [
+                                    ['pluginCode', 'string'],
+                                    ['mgmtCategory', 'string'],
+                                    ['userCategory', 'array'],
+                                    ['func', 'string'],
+                                    ['owner', 'string'],
+                                    ['lifecycle', 'string']
+                                ]
+                                
+                                // 检查 huaiye 字段是否存在
+                                def hasHuaiye = sh(
+                                    script: "jq -e '.huaiye != null' ${packageJsonPath} > /dev/null 2>&1 && echo 'yes' || echo 'no'",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (hasHuaiye == 'no') {
+                                    invalidPlugins.add("${plugin} (缺少 huaiye 字段)")
+                                    echo "❌ ${plugin}: 缺少 huaiye 字段"
+                                } else {
+                                    for (fieldInfo in fields) {
+                                        def fieldName = fieldInfo[0]
+                                        def fieldType = fieldInfo[1]
+                                        def checkCmd = fieldType == 'array' 
+                                            ? "jq -e '.huaiye.${fieldName} | type == \"array\" and length > 0' ${packageJsonPath}"
+                                            : "jq -e '.huaiye.${fieldName} | type == \"string\" and length > 0' ${packageJsonPath}"
+                                        
+                                        def fieldValid = sh(
+                                            script: "${checkCmd} > /dev/null 2>&1 && echo 'yes' || echo 'no'",
+                                            returnStdout: true
+                                        ).trim()
+                                        
+                                        if (fieldValid == 'no') {
+                                            missingFields.add(fieldName)
+                                        }
+                                    }
+                                    
+                                    invalidPlugins.add("${plugin} (字段缺失或为空: ${missingFields.join(', ')})")
+                                    echo "❌ ${plugin}: 字段缺失或为空: ${missingFields.join(', ')}"
+                                }
+                            }
+                        } else {
+                            invalidPlugins.add("${plugin} (package.json 不存在)")
+                            echo "❌ ${plugin}: package.json 文件不存在"
+                        }
+                    }
+                    
+                    if (invalidPlugins.size() > 0) {
+                        echo """
+                        ========================================
+                        ❌ 以下插件配置不完整：
+                        ${invalidPlugins.join('\n')}
+                        ========================================
+                        """
+                        // 校验失败时中止构建
+                        error "插件配置校验失败，请完善 package.json 中的 huaiye 字段"
+                    } else {
+                        echo "✅ 所有插件配置校验通过"
+                    }
+                }
+            }
+        }
+
+        stage('重新安装依赖') {
+            steps {
+                dir(env.YUEZHUO_DIR) {
+                    sh '''
+                        echo "======== 重新安装依赖 ========"
+                        yarn install --frozen-lockfile || yarn install
+                        echo "依赖安装完成"
+                    '''
+                }
+            }
+        }
+
+        stage('构建打包') {
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    def successCount = 0
+                    def failedPlugins = []
+                    def buildTimestamp = new Date().format('yyyyMMdd.HHmmss')
+                    
+                    dir(env.YUEZHUO_DIR) {
+                        // 清理旧的 tar 制品，避免归档时包含旧文件
+                        sh """
+                            echo "清理旧的 tar 制品..."
+                            rm -rf storage/tar/@huaiye
+                            mkdir -p storage/tar/@huaiye
+                        """
+                        
+                        for (plugin in plugins) {
+                            plugin = plugin.trim()
+                            if (!plugin) continue
+                            
+                            def fullName = "@huaiye/${plugin}"
+                            def pluginPath = "packages/plugins/@huaiye/${plugin}"
+                            echo "======== 开始处理: ${fullName} ========"
+                            
+                            try {
+                                // 0. 修改版本号（追加时间戳）
+                                sh """
+                                    cd ${pluginPath}
+                                    
+                                    # 获取当前版本号
+                                    current_version=\$(cat package.json | grep '"version"' | head -1 | sed 's/.*"version": "\\([^"]*\\)".*/\\1/')
+                                    echo "当前版本: \$current_version"
+                                    
+                                    # 追加时间戳
+                                    new_version="\${current_version}.${buildTimestamp}"
+                                    echo "新版本: \$new_version"
+                                    
+                                    # 修改 package.json
+                                    sed -i "s/\\"version\\": \\"[^\\"]*\\"/\\"version\\": \\"\$new_version\\"/" package.json
+                                    
+                                    # 验证修改
+                                    grep '"version"' package.json
+                                """
+                                
+                                // 1. 创建/注册插件
+                                sh "yarn pm create ${fullName} || true"
+                                
+                                // 2. 构建
+                                sh "yarn build ${fullName} --no-dts"
+                                
+                                // 3. 打包
+                                sh "yarn nocobase tar ${fullName}"
+                                
+                                successCount++
+                                echo "✅ ${fullName} 打包成功"
+                            } catch (Exception e) {
+                                failedPlugins.add(plugin)
+                                echo "❌ ${fullName} 打包失败: ${e.message}"
+                            }
+                        }
+                    }
+                    
+                    env.SUCCESS_COUNT = successCount.toString()
+                    env.FAILED_PLUGINS = failedPlugins.join(',')
+                    
+                    echo "======== 构建结果 ========"
+                    echo "成功: ${successCount} 个"
+                    echo "失败: ${failedPlugins.size()} 个"
+                    if (failedPlugins.size() > 0) {
+                        echo "失败列表: ${failedPlugins.join(', ')}"
+                    }
+                }
+            }
+        }
+
+        stage('归档制品') {
+            steps {
+                script {
+                    def timestamp = new Date().format('yyyyMMdd_HHmmss')
+                    def archiveDir = "${env.ARTIFACTS_DIR}/${timestamp}_build${env.BUILD_NUMBER}"
+                    
+                    sh """
+                        echo "======== 归档制品 ========"
+                        
+                        mkdir -p ${archiveDir}
+                        
+                        # 复制 .tgz 文件到归档目录
+                        if [ -d "${YUEZHUO_DIR}/storage/tar/@huaiye" ]; then
+                            cp ${YUEZHUO_DIR}/storage/tar/@huaiye/*.tgz ${archiveDir}/ 2>/dev/null || true
+                        fi
+                        
+                        # 创建构建信息文件
+                        cat > ${archiveDir}/BUILD_INFO.txt << EOF
+Build Number: ${env.BUILD_NUMBER}
+Plugins Commit: ${env.PLUGINS_COMMIT ?: 'N/A'}
+Plugins Branch: ${params.PLUGINS_BRANCH}
+Build Time: ${timestamp}
+Plugin Count: ${env.PLUGIN_COUNT}
+Success Count: ${env.SUCCESS_COUNT}
+Failed Plugins: ${env.FAILED_PLUGINS}
+Selected Plugins: ${env.PLUGIN_LIST.replace('\n', ', ')}
+EOF
+                        
+                        echo "制品已归档到: ${archiveDir}"
+                        ls -la ${archiveDir}/ || echo "归档目录为空"
+                    """
+                    
+                    // Jenkins 归档
+                    archiveArtifacts artifacts: "${YUEZHUO_DIR}/storage/tar/@huaiye/*.tgz", allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('清理旧制品') {
+            steps {
+                script {
+                    sh """
+                        echo "======== 清理超过 7 天的旧制品 ========"
+                        find ${ARTIFACTS_DIR} -maxdepth 1 -type d -mtime +7 -exec rm -rf {} \\; 2>/dev/null || true
+                        echo "清理完成"
+                        
+                        echo "当前制品目录:"
+                        ls -lht ${ARTIFACTS_DIR}/ | head -20
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ========================================
+            ✅ 插件打包成功！
+            ========================================
+            构建号: ${env.BUILD_NUMBER}
+            成功打包: ${env.SUCCESS_COUNT} 个插件
+            制品目录: ${env.ARTIFACTS_DIR}
+            ========================================
+            """
+        }
+        failure {
+            echo """
+            ========================================
+            ❌ 插件打包失败！
+            ========================================
+            请检查控制台日志获取详细错误信息。
+            ========================================
+            """
+        }
+    }
+}

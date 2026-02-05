@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>构建透视 - JSON 渲染版</title>
+    <!-- 使用 Vue 3 (CDN for demo purposes) -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f0f2f5;
+            padding: 20px;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .flex {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .badge-success {
+            background: #e6ffFA;
+            color: #00bcd4;
+        }
+
+        /* Cyan-ish */
+        .search-box {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        tr:hover {
+            background: #f9f9f9;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app" class="app-container">
+        <div class="card flex">
+            <h2>🔎 构建透视看板 (Scheme 4)</h2>
+            <div>
+                <span class="badge" style="background: #e6f7ff; color: #1890ff;">Total: {{ reportData.stats.total
+                    }}</span>
+                <span class="badge" style="background: #f6ffed; color: #52c41a;">Pass: {{ reportData.stats.passed
+                    }}</span>
+                <span class="badge" style="background: #fff1f0; color: #f5222d;">Fail: {{ reportData.stats.failed
+                    }}</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="flex">
+                <h3>组件列表</h3>
+                <input v-model="search" placeholder="🔍 搜索插件..." class="search-box">
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>插件名称</th>
+                        <th>耗时</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="plugin in filteredPlugins" :key="plugin.name">
+                        <td>{{ plugin.name }}</td>
+                        <td>{{ plugin.duration }}ms</td>
+                        <td>
+                            <span :class="plugin.status === 'success' ? 'badge badge-success' : 'badge'"
+                                :style="plugin.status === 'success' ? 'background: #f6ffed; color: #52c41a' : 'background: #fff1f0; color: #f5222d'">
+                                {{ plugin.status.toUpperCase() }}
+                            </span>
+                        </td>
+                        <td>
+                            <button @click="showLog(plugin)">查看日志</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed } = Vue;
+
+        createApp({
+            setup() {
+                // 模拟 Jenkins 生成的 report.json 数据
+                const reportData = ref({
+                    buildId: 88,
+                    timestamp: "2026-02-02 14:30:00",
+                    stats: { total: 5, passed: 4, failed: 1 },
+                    plugins: [
+                        { name: "@huaiye/plugin-core", status: "success", duration: 4500, log: "Build success..." },
+                        { name: "@huaiye/plugin-ui", status: "success", duration: 3200, log: "Build success..." },
+                        { name: "@huaiye/plugin-utils", status: "failed", duration: 1200, log: "Error: Syntax error..." },
+                        { name: "@huaiye/plugin-map", status: "success", duration: 5100, log: "Build success..." },
+                        { name: "@huaiye/plugin-chart", status: "success", duration: 2800, log: "Build success..." },
+                    ]
+                });
+
+                const search = ref('');
+
+                const filteredPlugins = computed(() => {
+                    return reportData.value.plugins.filter(p =>
+                        p.name.toLowerCase().includes(search.value.toLowerCase())
+                    );
+                });
+
+                const showLog = (plugin) => {
+                    alert(`日志预览 [${plugin.name}]:\n${plugin.log}`);
+                };
+
+                return { reportData, search, filteredPlugins, showLog };
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>

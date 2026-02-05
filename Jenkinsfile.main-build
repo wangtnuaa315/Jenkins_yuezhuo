@@ -1,0 +1,261 @@
+/**
+ * ============================================================================
+ * Yuezhuo 主工程构建任务
+ * ============================================================================
+ * 
+ * 【功能说明】
+ * - 克隆/更新 Yuezhuo 主项目代码
+ * - 安装依赖并构建主项目
+ * - 构建结果保存到共享目录供插件打包任务使用
+ * 
+ * 【依赖关系】
+ * - 无依赖，可独立运行
+ * - 下游任务：yuezhuo-plugin-build
+ * 
+ * 【运行频率】
+ * - 首次必须运行
+ * - 后续仅在主工程代码更新时运行
+ * 
+ * 【共享目录】
+ * /mnt/sdb3/yuezhuo-workspace/yuezhuo/
+ * 
+ * 【维护信息】
+ * 创建时间：2026-01-16
+ * ============================================================================
+ */
+
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'YUEZHUO_REPO',
+            defaultValue: 'http://192.168.1.6:9000/innovation/yuezhuo.git',
+            description: 'Yuezhuo 主项目仓库地址'
+        )
+        string(
+            name: 'YUEZHUO_BRANCH',
+            defaultValue: 'develop',
+            description: 'Yuezhuo 主项目分支'
+        )
+        booleanParam(
+            name: 'FORCE_REBUILD',
+            defaultValue: false,
+            description: '强制重新构建（即使已构建过）'
+        )
+        booleanParam(
+            name: 'CLEAN_WORKSPACE',
+            defaultValue: false,
+            description: '完全清理工作区后重新构建'
+        )
+        string(
+            name: 'PLUGINS_REPO',
+            defaultValue: 'http://192.168.1.6:9000/innovation/yuezhuo-plugins.git',
+            description: '插件仓库地址'
+        )
+        string(
+            name: 'PLUGINS_BRANCH',
+            defaultValue: 'master',
+            description: '插件仓库分支'
+        )
+    }
+
+    environment {
+        // 共享工作目录（供插件任务复用）
+        SHARED_WORKSPACE = '/mnt/sdb3/yuezhuo-workspace'
+        YUEZHUO_DIR = "${SHARED_WORKSPACE}/yuezhuo"
+        PLUGINS_DIR = "${SHARED_WORKSPACE}/yuezhuo-plugins"
+        // Git 凭证 ID
+        GIT_CREDENTIALS = 'yuezhuo-git-credentials'
+    }
+
+    stages {
+        stage('环境检查') {
+            steps {
+                script {
+                    sh '''
+                        echo "======== 环境信息 ========"
+                        echo "Node.js 版本: $(node -v)"
+                        echo "Yarn 版本: $(yarn -v)"
+                        echo "共享工作目录: ${SHARED_WORKSPACE}"
+                        echo "========================="
+                    '''
+                }
+            }
+        }
+
+        stage('准备工作目录') {
+            steps {
+                script {
+                    sh """
+                        mkdir -p ${SHARED_WORKSPACE}
+                        
+                        if [ "${params.CLEAN_WORKSPACE}" = "true" ]; then
+                            echo "清理工作区..."
+                            rm -rf ${YUEZHUO_DIR}
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('检查是否需要构建') {
+            steps {
+                script {
+                    def needBuild = params.FORCE_REBUILD || params.CLEAN_WORKSPACE
+                    
+                    // 检查是否已构建
+                    def buildMarker = "${env.YUEZHUO_DIR}/.build_complete"
+                    def markerExists = sh(script: "test -f ${buildMarker} && echo 'yes' || echo 'no'", returnStdout: true).trim()
+                    
+                    if (markerExists == 'no') {
+                        needBuild = true
+                        echo "首次构建，需要完整构建"
+                    } else if (!needBuild) {
+                        echo "主工程已构建，跳过构建（如需重新构建请勾选 FORCE_REBUILD）"
+                    }
+                    
+                    env.NEED_BUILD = needBuild.toString()
+                }
+            }
+        }
+
+        stage('拉取代码') {
+            when {
+                expression { env.NEED_BUILD == 'true' }
+            }
+            steps {
+                script {
+                    dir(env.YUEZHUO_DIR) {
+                        // 检查是否已有仓库
+                        def hasGit = sh(script: 'test -d .git && echo "yes" || echo "no"', returnStdout: true).trim()
+                        
+                        if (hasGit == 'yes') {
+                            echo "更新代码..."
+                            sh """
+                                git fetch origin
+                                git checkout ${params.YUEZHUO_BRANCH}
+                                git pull origin ${params.YUEZHUO_BRANCH}
+                            """
+                        } else {
+                            echo "克隆代码..."
+                            deleteDir()
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: "*/${params.YUEZHUO_BRANCH}"]],
+                                extensions: [],
+                                userRemoteConfigs: [[
+                                    url: params.YUEZHUO_REPO,
+                                    credentialsId: env.GIT_CREDENTIALS
+                                ]]
+                            ])
+                        }
+                        
+                        env.YUEZHUO_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        echo "当前 Commit: ${env.YUEZHUO_COMMIT}"
+                    }
+                }
+            }
+        }
+
+        stage('拉取插件仓库') {
+            steps {
+                script {
+                    sh "mkdir -p ${PLUGINS_DIR}"
+                    
+                    dir(env.PLUGINS_DIR) {
+                        echo "拉取插件仓库..."
+                        // 使用 checkout 确保凭证正确传递
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: "*/${params.PLUGINS_BRANCH}"]],
+                            extensions: [],
+                            userRemoteConfigs: [[
+                                url: params.PLUGINS_REPO,
+                                credentialsId: env.GIT_CREDENTIALS
+                            ]]
+                        ])
+                        
+                        env.PLUGINS_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        echo "插件仓库 Commit: ${env.PLUGINS_COMMIT}"
+                    }
+                }
+            }
+        }
+
+        stage('安装依赖') {
+            when {
+                expression { env.NEED_BUILD == 'true' }
+            }
+            steps {
+                dir(env.YUEZHUO_DIR) {
+                    sh '''
+                        echo "======== 配置 npm 镜像 ========"
+                        yarn config set registry https://registry.npmmirror.com/
+                        yarn config set disable-self-update-check true
+                        
+                        echo "======== 安装依赖 ========"
+                        yarn install --frozen-lockfile || yarn install
+                        echo "依赖安装完成"
+                    '''
+                }
+            }
+        }
+
+        stage('构建主项目') {
+            when {
+                expression { env.NEED_BUILD == 'true' }
+            }
+            steps {
+                dir(env.YUEZHUO_DIR) {
+                    sh '''
+                        echo "======== 构建 Yuezhuo 主项目 ========"
+                        yarn build
+                        echo "构建完成"
+                        
+                        # 创建构建完成标记
+                        echo "$(date '+%Y-%m-%d %H:%M:%S')" > .build_complete
+                    '''
+                }
+            }
+        }
+
+        stage('记录构建信息') {
+            steps {
+                script {
+                    def buildInfo = """
+Build Number: ${env.BUILD_NUMBER}
+Build Time: ${new Date().format('yyyy-MM-dd HH:mm:ss')}
+Yuezhuo Branch: ${params.YUEZHUO_BRANCH}
+Yuezhuo Commit: ${env.YUEZHUO_COMMIT ?: 'N/A'}
+Need Build: ${env.NEED_BUILD}
+"""
+                    writeFile file: "${env.YUEZHUO_DIR}/.build_info", text: buildInfo
+                    echo buildInfo
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ========================================
+            ✅ 主工程构建成功！
+            ========================================
+            共享目录: ${env.SHARED_WORKSPACE}
+            Yuezhuo 目录: ${env.YUEZHUO_DIR}
+            ========================================
+            """
+        }
+        failure {
+            echo """
+            ========================================
+            ❌ 主工程构建失败！
+            ========================================
+            请检查控制台日志获取详细错误信息。
+            ========================================
+            """
+        }
+    }
+}

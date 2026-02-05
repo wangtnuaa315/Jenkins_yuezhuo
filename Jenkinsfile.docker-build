@@ -1,0 +1,280 @@
+/**
+ * ============================================================================
+ * Yuezhuo 主工程 Docker 打包任务
+ * ============================================================================
+ * 
+ * 【功能说明】
+ * - 将已构建的主工程打包为 Docker 镜像
+ * - 导出为 tar 包：yuezhuo-<version>.tar
+ * 
+ * 【依赖关系】
+ * - 依赖：yuezhuo-main-build（必须先构建主工程）
+ * 
+ * 【运行频率】
+ * - 按需运行，发布时使用
+ * 
+ * 【制品输出】
+ * - Docker 镜像: yuezhuo:<version>
+ * - Tar 包: yuezhuo-<version>.tar
+ * 
+ * 【维护信息】
+ * 创建时间：2026-01-27
+ * ============================================================================
+ */
+
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'VERSION',
+            defaultValue: '2.0.1',
+            description: '版本号（例如：2.0.1），打包后生成 yuezhuo-<版本号>.tar'
+        )
+        string(
+            name: 'YUEZHUO_BRANCH',
+            defaultValue: 'develop',
+            description: '主工程分支'
+        )
+        string(
+            name: 'SVN_BASE_URL',
+            defaultValue: 'http://192.168.1.6/svn/product_version/02.基础产品线/01.鸑鷟/V100R001C01/B01/Software/Docker/test',
+            description: 'SVN 归档路径（不含日期目录）'
+        )
+    }
+
+    environment {
+        // 共享工作目录
+        SHARED_WORKSPACE = '/mnt/sdb3/yuezhuo-workspace'
+        YUEZHUO_DIR = "${SHARED_WORKSPACE}/yuezhuo"
+        YUEZHUO_REPO = 'http://192.168.1.6:9000/innovation/yuezhuo.git'
+        GIT_CREDENTIALS = 'yuezhuo-git-credentials'
+        // 制品输出目录
+        ARTIFACTS_DIR = '/mnt/sdb3/Jenkins_Yuezhuo'
+        // 备份目录（使用 BUILD_ID 确保唯一）
+        BACKUP_DIR = "/tmp/yuezhuo-docker-backup-${BUILD_ID}"
+        // 镜像名称
+        IMAGE_NAME = 'yuezhuo'
+        // SVN 凭证 ID
+        SVN_CREDENTIALS = 'svn-release-credentials'
+    }
+
+    stages {
+        stage('环境检查') {
+            steps {
+                script {
+                    sh '''
+                        echo "======== 环境信息 ========"
+                        echo "Node: $(hostname)"
+                        echo "Docker: $(docker --version)"
+                        echo "SVN: $(svn --version --quiet)"
+                        echo "版本号: ''' + params.VERSION + '''"
+                        echo "输出文件: yuezhuo-''' + params.VERSION + '''.tar"
+                        echo "========================="
+                    '''
+                }
+            }
+        }
+
+        stage('检查主工程') {
+            steps {
+                script {
+                    // 检查主工程是否已构建
+                    def buildComplete = sh(
+                        script: "test -f ${YUEZHUO_DIR}/.build_complete && echo 'yes' || echo 'no'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (buildComplete == 'no') {
+                        error """
+                        ========================================
+                        ❌ 主工程未构建！
+                        ========================================
+                        请先运行 yuezhuo-main-build 任务构建主工程。
+                        ========================================
+                        """
+                    }
+                    
+                    // 显示上次构建信息
+                    sh "cat ${YUEZHUO_DIR}/.build_complete"
+                    echo "主工程已构建，继续..."
+                }
+            }
+        }
+
+        stage('获取 Commit 信息') {
+            steps {
+                script {
+                    dir(env.YUEZHUO_DIR) {
+                        // 获取 commit hash
+                        env.COMMIT_HASH = sh(
+                            script: 'git rev-parse HEAD',
+                            returnStdout: true
+                        ).trim()
+                        
+                        env.COMMIT_SHORT = sh(
+                            script: 'git rev-parse --short HEAD',
+                            returnStdout: true
+                        ).trim()
+                        
+                        echo """
+                        ========================================
+                        打包信息：
+                        - 版本: ${params.VERSION}
+                        - Commit: ${env.COMMIT_SHORT}
+                        - 镜像: ${env.IMAGE_NAME}:${params.VERSION}
+                        - 输出: yuezhuo-${params.VERSION}.tar
+                        ========================================
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('备份目录') {
+            steps {
+                script {
+                    dir(env.YUEZHUO_DIR) {
+                        sh """
+                            echo "创建备份目录: ${BACKUP_DIR}"
+                            mkdir -p ${BACKUP_DIR}
+                            
+                            echo "备份 .git 目录..."
+                            [ -d ".git" ] && mv .git ${BACKUP_DIR}/ || echo ".git 不存在，跳过"
+                            
+                            echo "备份 storage 目录..."
+                            [ -d "storage" ] && mv storage ${BACKUP_DIR}/ || echo "storage 不存在，跳过"
+                            
+                            echo "备份 node_modules 目录..."
+                            [ -d "node_modules" ] && mv node_modules ${BACKUP_DIR}/ || echo "node_modules 不存在，跳过"
+                            
+                            echo "备份完成"
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('构建镜像') {
+            steps {
+                script {
+                    dir(env.YUEZHUO_DIR) {
+                        sh """
+                            echo "======== 开始构建 Docker 镜像 ========"
+                            docker build \
+                                --build-arg COMMIT_HASH=${env.COMMIT_HASH} \
+                                -f Dockerfile.local \
+                                -t ${env.IMAGE_NAME}:${params.VERSION} \
+                                .
+                            echo "======== 镜像构建完成 ========"
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('导出 Tar 包') {
+            steps {
+                script {
+                    def tarFileName = "yuezhuo-${params.VERSION}.tar"
+                    def outputPath = "${env.ARTIFACTS_DIR}/${tarFileName}"
+                    
+                    sh """
+                        echo "======== 导出镜像为 Tar 包 ========"
+                        mkdir -p ${ARTIFACTS_DIR}
+                        
+                        # 删除旧的同名文件
+                        rm -f ${outputPath}
+                        
+                        # 导出镜像
+                        docker save -o ${outputPath} ${env.IMAGE_NAME}:${params.VERSION}
+                        
+                        # 显示文件信息
+                        echo "输出文件: ${outputPath}"
+                        ls -lh ${outputPath}
+                        
+                        echo "======== 导出完成 ========"
+                    """
+                    
+                    env.TAR_FILE_PATH = outputPath
+                    env.TAR_FILE_NAME = tarFileName
+                }
+            }
+        }
+
+        stage('上传到 SVN') {
+            steps {
+                script {
+                    def dateDir = new Date().format('yyyy-MM-dd')
+                    def svnUrl = "${params.SVN_BASE_URL}/${dateDir}"
+                    
+                    withCredentials([usernamePassword(credentialsId: env.SVN_CREDENTIALS, usernameVariable: 'SVN_USER', passwordVariable: 'SVN_PASS')]) {
+                        sh """
+                            echo "======== 上传到 SVN ========"
+                            echo "SVN 目录: ${svnUrl}"
+                            
+                            # 检查目录是否存在，不存在则创建
+                            svn list "${svnUrl}" --username "\${SVN_USER}" --password "\${SVN_PASS}" --non-interactive --trust-server-cert-failures=unknown-ca 2>/dev/null || \
+                            svn mkdir "${svnUrl}" -m "Create directory for ${dateDir}" --username "\${SVN_USER}" --password "\${SVN_PASS}" --non-interactive --trust-server-cert-failures=unknown-ca
+                            
+                            # 上传文件
+                            echo "上传: ${env.TAR_FILE_NAME}"
+                            svn import "${env.TAR_FILE_PATH}" "${svnUrl}/${env.TAR_FILE_NAME}" -m "Upload ${env.TAR_FILE_NAME} from build #${env.BUILD_NUMBER}" --username "\${SVN_USER}" --password "\${SVN_PASS}" --non-interactive --trust-server-cert-failures=unknown-ca
+                            
+                            echo "SVN 上传完成"
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                // 恢复备份的目录
+                dir(env.YUEZHUO_DIR) {
+                    sh """
+                        echo "======== 恢复备份目录 ========"
+                        
+                        [ -d "${BACKUP_DIR}/.git" ] && mv ${BACKUP_DIR}/.git . && echo "恢复 .git" || true
+                        [ -d "${BACKUP_DIR}/storage" ] && mv ${BACKUP_DIR}/storage . && echo "恢复 storage" || true
+                        [ -d "${BACKUP_DIR}/node_modules" ] && mv ${BACKUP_DIR}/node_modules . && echo "恢复 node_modules" || true
+                        
+                        # 清理备份目录
+                        rm -rf ${BACKUP_DIR}
+                        
+                        echo "恢复完成"
+                    """
+                }
+            }
+        }
+        success {
+            script {
+                echo """
+                ========================================
+                ✅ Docker 打包成功！
+                ========================================
+                版本: ${params.VERSION}
+                镜像: ${env.IMAGE_NAME}:${params.VERSION}
+                Commit: ${env.COMMIT_SHORT}
+                
+                输出文件:
+                ${env.TAR_FILE_PATH}
+                ========================================
+                """
+            }
+        }
+        failure {
+            script {
+                echo """
+                ========================================
+                ❌ Docker 打包失败！
+                ========================================
+                请检查控制台日志获取详细错误信息。
+                ========================================
+                """
+            }
+        }
+    }
+}

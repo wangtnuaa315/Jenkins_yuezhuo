@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yuezhuo 插件构建报告</title>
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --success-color: #10b981;
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-main: #1f2937;
+            --text-secondary: #6b7280;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        /* Header Card */
+        .header-card {
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-project h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .header-project p {
+            margin: 8px 0 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .build-badge {
+            background-color: rgba(255, 255, 255, 0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 500;
+            backdrop-filter: blur(4px);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            text-align: center;
+            border-top: 4px solid transparent;
+        }
+
+        .stat-card.total { border-color: var(--primary-color); }
+        .stat-card.success { border-color: var(--success-color); }
+        .stat-card.failed { border-color: var(--danger-color); }
+        .stat-card.duration { border-color: var(--warning-color); }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin: 10px 0;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Main Content */
+        .main-card {
+            background: var(--card-bg);
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #e5e7eb;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        /* Table Styles */
+        .plugin-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .plugin-table th {
+            text-align: left;
+            padding: 12px;
+            background-color: #f9fafb;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .plugin-table td {
+            padding: 14px 12px;
+            border-bottom: 1px solid #f3f4f6;
+            vertical-align: middle;
+        }
+
+        .plugin-name {
+            font-weight: 500;
+            color: var(--primary-color);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-failed {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .log-peek {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: #f9fafb;
+            padding: 8px;
+            border-radius: 4px;
+            max-width: 400px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            height: 8px;
+            background-color: #e5e7eb;
+            border-radius: 4px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: var(--success-color);
+            width: 0%; /* Dynamic */
+            transition: width 0.5s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header-card">
+            <div class="header-project">
+                <h1>Yuezhuo Plugin Auto-Build</h1>
+                <p>构建任务: #88 &bull; 2026-02-02 14:30:00</p>
+            </div>
+            <div class="build-badge">
+                Commit: <code>a1b2c3d</code>
+            </div>
+        </div>
+
+        <!-- Summary Stats (Mock Data) -->
+        <div class="stats-grid">
+            <div class="stat-card total">
+                <div class="stat-value" style="color: var(--primary-color)">12</div>
+                <div class="stat-label">总插件变动</div>
+            </div>
+            <div class="stat-card success">
+                <!-- 实际使用时替换为: ${env.SUCCESS_COUNT} -->
+                <div class="stat-value" style="color: var(--success-color)">10</div>
+                <div class="stat-label">编译成功</div>
+            </div>
+            <div class="stat-card failed">
+                <!-- 实际使用时替换为: ${env.FAILED_COUNT} -->
+                <div class="stat-value" style="color: var(--danger-color)">2</div>
+                <div class="stat-label">编译失败</div>
+            </div>
+            <div class="stat-card duration">
+                <div class="stat-value" style="color: var(--warning-color)">4m 12s</div>
+                <div class="stat-label">总耗时</div>
+            </div>
+        </div>
+
+        <!-- Build Details -->
+        <div class="main-card">
+            <div class="card-header">
+                <div class="card-title">插件编译详情</div>
+                <div style="font-size: 14px; color: var(--text-secondary);">
+                    成功率: 83%
+                </div>
+            </div>
+            
+            <div class="progress-container">
+                <div class="progress-bar" style="width: 83%"></div>
+            </div>
+
+            <table class="plugin-table" style="margin-top: 20px;">
+                <thead>
+                    <tr>
+                        <th>插件名称</th>
+                        <th>版本</th>
+                        <th>状态</th>
+                        <th style="width: 40%">日志摘要 / 错误原因</th>
+                        <th>耗时</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- 循环渲染行 -->
+                    <tr>
+                        <td><span class="plugin-name">@huaiye/plugin-core</span></td>
+                        <td>v1.2.0</td>
+                        <td><span class="status-badge status-success">Success</span></td>
+                        <td><div class="log-peek">Build completed successfully in 45s</div></td>
+                        <td>45s</td>
+                    </tr>
+                    <tr>
+                        <td><span class="plugin-name">@huaiye/plugin-auth</span></td>
+                        <td>v1.1.5</td>
+                        <td><span class="status-badge status-success">Success</span></td>
+                        <td><div class="log-peek">Build completed successfully in 32s</div></td>
+                        <td>32s</td>
+                    </tr>
+                    <tr>
+                        <td><span class="plugin-name">@huaiye/plugin-video-analysis</span></td>
+                        <td>v2.0.1</td>
+                        <td><span class="status-badge status-failed">Failed</span></td>
+                        <td><div class="log-peek" style="color: var(--danger-color)">Error: TypeScript validation failed at src/index.ts:24</div></td>
+                        <td>12s</td>
+                    </tr>
+                     <tr>
+                        <td><span class="plugin-name">@huaiye/plugin-map-viewer</span></td>
+                        <td>v1.0.3</td>
+                        <td><span class="status-badge status-failed">Failed</span></td>
+                        <td><div class="log-peek" style="color: var(--danger-color)">Error: Missing dependency 'leaflet'</div></td>
+                        <td>8s</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div style="text-align: center; color: var(--text-secondary); font-size: 12px; margin-top: 40px;">
+            Generated by Jenkins CI &bull; Yuezhuo Plugin System
+        </div>
+    </div>
+</body>
+</html>

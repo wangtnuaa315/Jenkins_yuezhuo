@@ -1,0 +1,406 @@
+/**
+ * ============================================================================
+ * Yuezhuo 插件自动触发打包任务
+ * ============================================================================
+ * 
+ * 【功能说明】
+ * - 监听插件仓库代码提交
+ * - 自动检测变更的插件
+ * - 自动触发打包
+ * 
+ * 【触发方式】
+ * - GitLab Webhook 推送触发
+ * - 需要在 GitLab 配置 Webhook URL
+ * 
+ * 【依赖关系】
+ * - 依赖：yuezhuo-main-build（必须先构建主工程）
+ * 
+ * 【维护信息】
+ * 创建时间：2026-01-19
+ * ============================================================================
+ */
+
+pipeline {
+    agent any
+
+    // 触发器在 Jenkins UI 中配置，无需在此定义
+    // triggers {
+    //     gitlab(
+    //         triggerOnPush: true,
+    //         triggerOnMergeRequest: false,
+    //         branchFilterType: 'All',
+    //         secretToken: 'xuanyue-plugin-webhook-token'
+    //     )
+    // }
+
+    parameters {
+        string(
+            name: 'PLUGINS_REPO',
+            defaultValue: 'http://192.168.1.6:9000/innovation/yuezhuo-plugins.git',
+            description: '插件仓库地址'
+        )
+        string(
+            name: 'PLUGINS_BRANCH',
+            defaultValue: 'master',
+            description: '插件仓库分支'
+        )
+        booleanParam(
+            name: 'BUILD_ALL_CHANGED',
+            defaultValue: true,
+            description: '自动检测并打包所有变更的插件'
+        )
+    }
+
+    environment {
+        // 共享工作目录
+        SHARED_WORKSPACE = '/mnt/sdb3/yuezhuo-workspace'
+        YUEZHUO_DIR = "${SHARED_WORKSPACE}/yuezhuo"
+        PLUGINS_DIR = "${SHARED_WORKSPACE}/yuezhuo-plugins"
+        ARTIFACTS_DIR = '/mnt/sdb3/Jenkins_Yuezhuo'
+        // Git 凭证 ID
+        GIT_CREDENTIALS = 'yuezhuo-git-credentials'
+    }
+
+    stages {
+        stage('环境检查') {
+            steps {
+                script {
+                    sh '''
+                        echo "======== 环境信息 ========"
+                        echo "Node.js 版本: $(node -v)"
+                        echo "Yarn 版本: $(yarn -v)"
+                        echo "共享工作目录: ${SHARED_WORKSPACE}"
+                        echo "触发方式: 自动触发"
+                        echo "========================="
+                    '''
+                }
+            }
+        }
+
+        stage('检查主工程') {
+            steps {
+                script {
+                    def buildMarker = "${env.YUEZHUO_DIR}/.build_complete"
+                    def markerExists = sh(script: "test -f ${buildMarker} && echo 'yes' || echo 'no'", returnStdout: true).trim()
+                    
+                    if (markerExists == 'no') {
+                        error "主工程尚未构建！请先运行 yuezhuo-main-build 任务。"
+                    }
+                    
+                    echo "主工程已构建，继续..."
+                    sh "cat ${buildMarker}"
+                }
+            }
+        }
+
+        stage('获取变更插件') {
+            steps {
+                script {
+                    sh "mkdir -p ${PLUGINS_DIR}"
+                    
+                    dir(env.PLUGINS_DIR) {
+                        // 获取上次构建的 commit
+                        def lastCommit = sh(script: 'git rev-parse HEAD 2>/dev/null || echo ""', returnStdout: true).trim()
+                        
+                        echo "更新插件仓库..."
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: "*/${params.PLUGINS_BRANCH}"]],
+                            extensions: [],
+                            userRemoteConfigs: [[
+                                url: params.PLUGINS_REPO,
+                                credentialsId: env.GIT_CREDENTIALS
+                            ]]
+                        ])
+                        
+                        def currentCommit = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        env.PLUGINS_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        echo "插件仓库 Commit: ${env.PLUGINS_COMMIT}"
+                        
+                        // 检测变更的插件
+                        def changedPlugins = []
+                        
+                        if (lastCommit && lastCommit != currentCommit) {
+                            // 获取变更的文件列表
+                            def changedFiles = sh(
+                                script: "git diff --name-only ${lastCommit}..${currentCommit} | grep '@huaiye/' | cut -d'/' -f2 | sort -u",
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (changedFiles) {
+                                changedPlugins = changedFiles.split('\n').toList()
+                                echo "检测到变更的插件: ${changedPlugins.join(', ')}"
+                            }
+                        }
+                        
+                        // 如果没有检测到变更，或者是首次构建，则打包所有插件
+                        if (changedPlugins.isEmpty()) {
+                            echo "未检测到特定变更，打包所有插件..."
+                            def allPlugins = sh(
+                                script: "ls -1 @huaiye/ 2>/dev/null | sort",
+                                returnStdout: true
+                            ).trim()
+                            changedPlugins = allPlugins.split('\n').toList()
+                        }
+                        
+                        env.PLUGIN_LIST = changedPlugins.join('\n')
+                        env.PLUGIN_COUNT = changedPlugins.size().toString()
+                        
+                        echo "将打包 ${changedPlugins.size()} 个插件"
+                    }
+                }
+            }
+        }
+
+        stage('拷贝插件到主项目') {
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    
+                    // 确保目录存在（不清空，保留主工程自带的插件如 plugin-license-manager）
+                    sh """
+                        echo "确保插件目录存在..."
+                        mkdir -p ${YUEZHUO_DIR}/packages/plugins/@huaiye
+                    """
+                    
+                    // 拷贝变更的插件（先删除旧版本再拷贝新版本）
+                    echo "======== 拷贝变更的插件 ========"
+                    for (plugin in plugins) {
+                        plugin = plugin.trim()
+                        if (!plugin) continue
+                        
+                        sh """
+                            echo "拷贝: ${plugin}"
+                            rm -rf ${YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}
+                            cp -r ${PLUGINS_DIR}/@huaiye/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
+                        """
+                    }
+                    
+                    echo "插件拷贝完成"
+                }
+            }
+        }
+        
+        stage('校验插件配置') {
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    def invalidPlugins = []
+                    
+                    echo "======== 校验插件 package.json 配置 ========"
+                    
+                    for (plugin in plugins) {
+                        plugin = plugin.trim()
+                        if (!plugin) continue
+                        
+                        def packageJsonPath = "${env.YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}/package.json"
+                        def exists = sh(script: "test -f ${packageJsonPath} && echo 'yes' || echo 'no'", returnStdout: true).trim()
+                        
+                        if (exists == 'yes') {
+                            // 检查 huaiye 字段是否存在
+                            def hasHuaiye = sh(
+                                script: """
+                                    cat ${packageJsonPath} | grep -q '"huaiye"' && echo 'yes' || echo 'no'
+                                """,
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (hasHuaiye == 'no') {
+                                invalidPlugins.add(plugin)
+                                echo "❌ ${plugin}: 缺少 huaiye 字段"
+                            } else {
+                                // 进一步检查必要的子字段
+                                def requiredFields = ['pluginCode', 'mgmtCategory', 'userCategory', 'func', 'owner', 'lifecycle']
+                                def missingFields = []
+                                
+                                for (field in requiredFields) {
+                                    def hasField = sh(
+                                        script: """
+                                            cat ${packageJsonPath} | grep -q '"${field}"' && echo 'yes' || echo 'no'
+                                        """,
+                                        returnStdout: true
+                                    ).trim()
+                                    
+                                    if (hasField == 'no') {
+                                        missingFields.add(field)
+                                    }
+                                }
+                                
+                                if (missingFields.size() > 0) {
+                                    invalidPlugins.add("${plugin} (缺少: ${missingFields.join(', ')})")
+                                    echo "❌ ${plugin}: huaiye 字段缺少必要属性: ${missingFields.join(', ')}"
+                                } else {
+                                    echo "✅ ${plugin}: 配置正确"
+                                }
+                            }
+                        } else {
+                            invalidPlugins.add("${plugin} (package.json 不存在)")
+                            echo "❌ ${plugin}: package.json 文件不存在"
+                        }
+                    }
+                    
+                    if (invalidPlugins.size() > 0) {
+                        echo """
+                        ========================================
+                        ⚠️ 以下插件配置不完整：
+                        ${invalidPlugins.join('\n')}
+                        ========================================
+                        """
+                        // 可选：取消注释下行以在校验失败时中止构建
+                        // error "插件配置校验失败，请完善 package.json 中的 huaiye 字段"
+                    } else {
+                        echo "✅ 所有插件配置校验通过"
+                    }
+                }
+            }
+        }
+
+        stage('重新安装依赖') {
+            steps {
+                dir(env.YUEZHUO_DIR) {
+                    sh '''
+                        echo "======== 重新安装依赖 ========"
+                        yarn install --frozen-lockfile || yarn install
+                        echo "依赖安装完成"
+                    '''
+                }
+            }
+        }
+
+        stage('构建打包') {
+            steps {
+                script {
+                    def plugins = env.PLUGIN_LIST.split('\n')
+                    def successCount = 0
+                    def failedPlugins = []
+                    def buildTimestamp = new Date().format('yyyyMMdd.HHmmss')
+                    
+                    dir(env.YUEZHUO_DIR) {
+                        // 清理旧的 tar 制品，避免归档时包含旧文件
+                        sh """
+                            echo "清理旧的 tar 制品..."
+                            rm -rf storage/tar/@huaiye
+                            mkdir -p storage/tar/@huaiye
+                        """
+                        
+                        for (plugin in plugins) {
+                            plugin = plugin.trim()
+                            if (!plugin) continue
+                            
+                            def fullName = "@huaiye/${plugin}"
+                            def pluginPath = "packages/plugins/@huaiye/${plugin}"
+                            echo "======== 开始处理: ${fullName} ========"
+                            
+                            try {
+                                sh """
+                                    cd ${pluginPath}
+                                    
+                                    current_version=\$(cat package.json | grep '"version"' | head -1 | sed 's/.*"version": "\\([^"]*\\)".*/\\1/')
+                                    echo "当前版本: \$current_version"
+                                    
+                                    new_version="\${current_version}.${buildTimestamp}"
+                                    echo "新版本: \$new_version"
+                                    
+                                    sed -i "s/\\"version\\": \\"[^\\"]*\\"/\\"version\\": \\"\$new_version\\"/" package.json
+                                    
+                                    grep '"version"' package.json
+                                """
+                                
+                                sh "yarn pm create ${fullName} || true"
+                                sh "yarn build ${fullName} --no-dts"
+                                sh "yarn nocobase tar ${fullName}"
+                                
+                                successCount++
+                                echo "✅ ${fullName} 打包成功"
+                            } catch (Exception e) {
+                                failedPlugins.add(plugin)
+                                echo "❌ ${fullName} 打包失败: ${e.message}"
+                            }
+                        }
+                    }
+                    
+                    env.SUCCESS_COUNT = successCount.toString()
+                    env.FAILED_PLUGINS = failedPlugins.join(',')
+                    
+                    echo "======== 构建结果 ========"
+                    echo "成功: ${successCount} 个"
+                    echo "失败: ${failedPlugins.size()} 个"
+                    if (failedPlugins.size() > 0) {
+                        echo "失败列表: ${failedPlugins.join(', ')}"
+                    }
+                }
+            }
+        }
+
+        stage('归档制品') {
+            steps {
+                script {
+                    def timestamp = new Date().format('yyyyMMdd_HHmmss')
+                    def archiveDir = "${env.ARTIFACTS_DIR}/${timestamp}_auto_build${env.BUILD_NUMBER}"
+                    
+                    sh """
+                        echo "======== 归档制品 ========"
+                        
+                        mkdir -p ${archiveDir}
+                        
+                        if [ -d "${YUEZHUO_DIR}/storage/tar/@huaiye" ]; then
+                            cp ${YUEZHUO_DIR}/storage/tar/@huaiye/*.tgz ${archiveDir}/ 2>/dev/null || true
+                        fi
+                        
+                        cat > ${archiveDir}/BUILD_INFO.txt << EOF
+Build Number: ${env.BUILD_NUMBER}
+Trigger: Auto (代码提交触发)
+Plugins Commit: ${env.PLUGINS_COMMIT ?: 'N/A'}
+Plugins Branch: ${params.PLUGINS_BRANCH}
+Build Time: ${timestamp}
+Plugin Count: ${env.PLUGIN_COUNT}
+Success Count: ${env.SUCCESS_COUNT}
+Failed Plugins: ${env.FAILED_PLUGINS}
+Changed Plugins: ${env.PLUGIN_LIST.replace('\n', ', ')}
+EOF
+                        
+                        echo "制品已归档到: ${archiveDir}"
+                        ls -la ${archiveDir}/ || echo "归档目录为空"
+                    """
+                    
+                    archiveArtifacts artifacts: "${YUEZHUO_DIR}/storage/tar/@huaiye/*.tgz", allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('清理旧制品') {
+            steps {
+                script {
+                    sh """
+                        echo "======== 清理超过 7 天的旧制品 ========"
+                        find ${ARTIFACTS_DIR} -maxdepth 1 -type d -mtime +7 -exec rm -rf {} \\; 2>/dev/null || true
+                        echo "清理完成"
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ========================================
+            ✅ 自动打包成功！
+            ========================================
+            构建号: ${env.BUILD_NUMBER}
+            成功打包: ${env.SUCCESS_COUNT} 个插件
+            制品目录: ${env.ARTIFACTS_DIR}
+            ========================================
+            """
+        }
+        failure {
+            echo """
+            ========================================
+            ❌ 自动打包失败！
+            ========================================
+            请检查控制台日志获取详细错误信息。
+            ========================================
+            """
+        }
+    }
+}
