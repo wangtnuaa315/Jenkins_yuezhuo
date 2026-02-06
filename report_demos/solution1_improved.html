@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>方案1改进版：跳过配置不完整的插件（含错误原因）</title>
+</head>
+
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f3f4f6;">
+    <div
+        style="max-width: 900px; margin: 0 auto; background: #eff6ff; border: 1px solid #3b82f6; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <strong style="color: #1e40af;">💡 方案1改进版：</strong>
+        <span style="color: #1e3a8a;">校验失败的插件被跳过但会显示具体原因，配置正确的插件正常打包。</span>
+    </div>
+
+    <table cellpadding="0" cellspacing="0"
+        style="max-width: 900px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <!-- Header -->
+        <tr>
+            <td style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 24px;">
+                <h1 style="margin: 0; font-size: 22px;">Yuezhuo 插件构建报告</h1>
+                <p style="margin: 8px 0 0; opacity: 0.9; font-size: 14px;">构建 #27 - 2026-02-06 13:10:00 - 分支: master</p>
+            </td>
+        </tr>
+
+        <!-- Stats -->
+        <tr>
+            <td style="padding: 24px;">
+                <table cellpadding="0" cellspacing="0" style="width: 100%;">
+                    <tr>
+                        <td
+                            style="width: 20%; text-align: center; padding: 16px; background: #eff6ff; border-top: 4px solid #3b82f6;">
+                            <div style="font-size: 28px; font-weight: bold; color: #3b82f6;">19</div>
+                            <div style="font-size: 11px; color: #6b7280;">发现插件</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 20%; text-align: center; padding: 16px; background: #f0fdf4; border-top: 4px solid #10b981;">
+                            <div style="font-size: 28px; font-weight: bold; color: #10b981;">2</div>
+                            <div style="font-size: 11px; color: #6b7280;">构建成功</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 20%; text-align: center; padding: 16px; background: #fef2f2; border-top: 4px solid #ef4444;">
+                            <div style="font-size: 28px; font-weight: bold; color: #ef4444;">0</div>
+                            <div style="font-size: 11px; color: #6b7280;">构建失败</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 20%; text-align: center; padding: 16px; background: #fef3c7; border-top: 4px solid #f59e0b;">
+                            <div style="font-size: 28px; font-weight: bold; color: #f59e0b;">17</div>
+                            <div style="font-size: 11px; color: #6b7280;">配置跳过</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 20%; text-align: center; padding: 16px; background: #f3f4f6; border-top: 4px solid #6b7280;">
+                            <div style="font-size: 28px; font-weight: bold; color: #6b7280;">45.5s</div>
+                            <div style="font-size: 11px; color: #6b7280;">总耗时</div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Progress Bar -->
+                <div style="margin-top: 16px;">
+                    <div
+                        style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 4px;">
+                        <span>构建成功率（已打包/配置正确）</span>
+                        <span>100%</span>
+                    </div>
+                    <div style="height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden;">
+                        <div style="height: 100%; width: 100%; background: #10b981;"></div>
+                    </div>
+                </div>
+            </td>
+        </tr>
+
+        <!-- Built Plugins Table -->
+        <tr>
+            <td style="padding: 0 24px 24px;">
+                <div
+                    style="font-size: 16px; font-weight: 600; color: #1f2937; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">
+                    ✅ 已构建插件</div>
+                <table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+                    <tr style="background: #f9fafb;">
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            插件名称</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            版本</th>
+                        <th
+                            style="padding: 10px 12px; text-align: center; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            状态</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            耗时</th>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #3b82f6; font-weight: 500;">
+                            @huaiye/plugin-agent-chat</td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+                            2.0.0-alpha.43.20260206.131000</td>
+                        <td
+                            style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 18px;">
+                            ✅</td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+                            22s</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #3b82f6; font-weight: 500;">
+                            @huaiye/plugin-llm-chat</td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+                            2.0.0-alpha.43.20260206.131000</td>
+                        <td
+                            style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 18px;">
+                            ✅</td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+                            23.5s</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+
+        <!-- Skipped Plugins Table with Reasons -->
+        <tr>
+            <td style="padding: 0 24px 24px;">
+                <div
+                    style="font-size: 16px; font-weight: 600; color: #f59e0b; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">
+                    ⚠️ 配置不完整（已跳过）</div>
+                <table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                    <tr style="background: #fef3c7;">
+                        <th
+                            style="padding: 8px 12px; text-align: left; font-size: 11px; color: #92400e; font-weight: 600;">
+                            插件名称</th>
+                        <th
+                            style="padding: 8px 12px; text-align: left; font-size: 11px; color: #92400e; font-weight: 600;">
+                            缺失/错误字段</th>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-ai-knowledge-base</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-deep-research</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-device-tree-selector</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-integration-workflow</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #991b1b; font-weight: 500;">plugin-knowledge-graph</td>
+                        <td style="padding: 8px 12px; color: #ef4444; font-family: monospace;">❌ 缺少 huaiye 字段</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-media-server-config</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-message-queue</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-pdf-viewer-ocr</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #991b1b; font-weight: 500;">plugin-player</td>
+                        <td style="padding: 8px 12px; color: #ef4444; font-family: monospace;">❌ 缺少 huaiye 字段</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; color: #991b1b; font-weight: 500;">plugin-rag</td>
+                        <td style="padding: 8px 12px; color: #ef4444; font-family: monospace;">❌ name 必须以 @huaiye/ 开头
+                        </td>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-sie-comm-hub</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-speech-service-center</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-speech-to-text</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-video-capture</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-video-meeting</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-video-player</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                    <tr style="background: #fffbeb;">
+                        <td style="padding: 8px 12px; color: #78350f;">plugin-video-talk</td>
+                        <td style="padding: 8px 12px; color: #92400e; font-family: monospace;">huaiye.userCategory 为空数组
+                        </td>
+                    </tr>
+                </table>
+                <div
+                    style="margin-top: 12px; padding: 12px; background: #f3f4f6; border-radius: 6px; font-size: 12px; color: #6b7280;">
+                    <strong>💡 修复方法：</strong> 在插件的 <code>package.json</code> 中添加完整的 <code>huaiye</code> 配置：
+                    <pre
+                        style="margin: 8px 0 0; padding: 8px; background: #1f2937; color: #10b981; border-radius: 4px; overflow-x: auto;">"huaiye": {
+  "pluginCode": "xxx",
+  "mgmtCategory": "xxx",
+  "userCategory": ["category1", "category2"],  // 必须是非空数组
+  "func": "xxx",
+  "owner": "xxx",
+  "lifecycle": "stable"
+}</pre>
+                </div>
+            </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+            <td style="background: #f9fafb; padding: 16px; text-align: center;">
+                <a href="#"
+                    style="display: inline-block; background: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500;">查看完整构建日志</a>
+                <p style="margin: 12px 0 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI - Yuezhuo 插件构建系统
+                </p>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>

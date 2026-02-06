@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>方案2：严格校验，阻塞构建</title>
+</head>
+
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f3f4f6;">
+    <div
+        style="max-width: 800px; margin: 0 auto; background: #fef2f2; border: 1px solid #ef4444; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <strong style="color: #991b1b;">❌ 方案2说明：</strong>
+        <span style="color: #7f1d1d;">有任何插件校验失败，整个构建立即中断。必须所有插件配置正确才能继续。</span>
+    </div>
+
+    <table cellpadding="0" cellspacing="0"
+        style="max-width: 800px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <!-- Header - Error State -->
+        <tr>
+            <td style="background: linear-gradient(135deg, #991b1b 0%, #ef4444 100%); color: white; padding: 24px;">
+                <h1 style="margin: 0; font-size: 22px;">❌ Yuezhuo 插件构建报告 - 失败</h1>
+                <p style="margin: 8px 0 0; opacity: 0.9; font-size: 14px;">构建 #26 - 2026-02-06 10:13:06 - 分支: master</p>
+            </td>
+        </tr>
+
+        <!-- Stats -->
+        <tr>
+            <td style="padding: 24px;">
+                <table cellpadding="0" cellspacing="0" style="width: 100%;">
+                    <tr>
+                        <td
+                            style="width: 25%; text-align: center; padding: 16px; background: #eff6ff; border-top: 4px solid #3b82f6;">
+                            <div style="font-size: 28px; font-weight: bold; color: #3b82f6;">19</div>
+                            <div style="font-size: 11px; color: #6b7280;">总插件数</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 25%; text-align: center; padding: 16px; background: #f0fdf4; border-top: 4px solid #10b981;">
+                            <div style="font-size: 28px; font-weight: bold; color: #10b981;">0</div>
+                            <div style="font-size: 11px; color: #6b7280;">构建成功</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 25%; text-align: center; padding: 16px; background: #fef2f2; border-top: 4px solid #ef4444;">
+                            <div style="font-size: 28px; font-weight: bold; color: #ef4444;">19</div>
+                            <div style="font-size: 11px; color: #6b7280;">构建失败</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 25%; text-align: center; padding: 16px; background: #fffbeb; border-top: 4px solid #f59e0b;">
+                            <div style="font-size: 28px; font-weight: bold; color: #f59e0b;">0s</div>
+                            <div style="font-size: 11px; color: #6b7280;">总耗时</div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Progress Bar -->
+                <div style="margin-top: 16px;">
+                    <div
+                        style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 4px;">
+                        <span>成功率</span>
+                        <span>0%</span>
+                    </div>
+                    <div style="height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden;">
+                        <div style="height: 100%; width: 0%; background: #10b981;"></div>
+                    </div>
+                </div>
+            </td>
+        </tr>
+
+        <!-- Error Message -->
+        <tr>
+            <td style="padding: 0 24px 16px;">
+                <div style="background: #fef2f2; border: 1px solid #ef4444; border-radius: 8px; padding: 16px;">
+                    <div style="font-weight: 600; color: #991b1b; margin-bottom: 12px;">❌ 构建因配置校验失败而中断</div>
+                    <div style="font-size: 13px; color: #7f1d1d; margin-bottom: 12px;">以下 17 个插件配置不完整：</div>
+                    <table cellpadding="0" cellspacing="0" style="width: 100%; font-size: 12px;">
+                        <tr>
+                            <td style="padding: 4px 8px; color: #991b1b;">plugin-ai-knowledge-base</td>
+                            <td style="padding: 4px 8px; color: #6b7280;">userCategory 为空</td>
+                        </tr>
+                        <tr style="background: #fef2f2;">
+                            <td style="padding: 4px 8px; color: #991b1b;">plugin-deep-research</td>
+                            <td style="padding: 4px 8px; color: #6b7280;">userCategory 为空</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 4px 8px; color: #991b1b;">plugin-knowledge-graph</td>
+                            <td style="padding: 4px 8px; color: #6b7280;">缺少 huaiye 字段</td>
+                        </tr>
+                        <tr style="background: #fef2f2;">
+                            <td style="padding: 4px 8px; color: #991b1b;">plugin-player</td>
+                            <td style="padding: 4px 8px; color: #6b7280;">缺少 huaiye 字段</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 4px 8px; color: #991b1b;">plugin-rag</td>
+                            <td style="padding: 4px 8px; color: #6b7280;">name 必须以 @huaiye/ 开头</td>
+                        </tr>
+                        <tr style="background: #fef2f2;">
+                            <td style="padding: 4px 8px; color: #6b7280;" colspan="2">... 还有 12 个插件</td>
+                        </tr>
+                    </table>
+                </div>
+            </td>
+        </tr>
+
+        <!-- Plugin Table -->
+        <tr>
+            <td style="padding: 0 24px 24px;">
+                <div
+                    style="font-size: 16px; font-weight: 600; color: #1f2937; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">
+                    插件构建详情</div>
+                <table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+                    <tr style="background: #f9fafb;">
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            插件名称</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            版本</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            状态</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            错误信息</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            耗时</th>
+                    </tr>
+                    <tr>
+                        <td colspan="5" style="padding: 24px; text-align: center; color: #6b7280;">
+                            构建在校验阶段中断，无构建数据
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+            <td style="background: #f9fafb; padding: 16px; text-align: center;">
+                <a href="#"
+                    style="display: inline-block; background: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500;">查看完整构建日志</a>
+                <p style="margin: 12px 0 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI - Yuezhuo 插件构建系统
+                </p>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>

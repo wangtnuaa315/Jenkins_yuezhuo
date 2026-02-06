@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>方案1：跳过配置不完整的插件</title>
+</head>
+
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f3f4f6;">
+    <div
+        style="max-width: 800px; margin: 0 auto; background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <strong style="color: #92400e;">⚠️ 方案1说明：</strong>
+        <span style="color: #78350f;">校验失败的插件会被跳过，只打包配置正确的插件。构建继续进行，不会中断。</span>
+    </div>
+
+    <table cellpadding="0" cellspacing="0"
+        style="max-width: 800px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <!-- Header -->
+        <tr>
+            <td style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 24px;">
+                <h1 style="margin: 0; font-size: 22px;">Yuezhuo 插件构建报告</h1>
+                <p style="margin: 8px 0 0; opacity: 0.9; font-size: 14px;">构建 #27 - 2026-02-06 12:25:00 - 分支: master</p>
+            </td>
+        </tr>
+
+        <!-- Stats -->
+        <tr>
+            <td style="padding: 24px;">
+                <table cellpadding="0" cellspacing="0" style="width: 100%;">
+                    <tr>
+                        <td
+                            style="width: 25%; text-align: center; padding: 16px; background: #eff6ff; border-top: 4px solid #3b82f6;">
+                            <div style="font-size: 28px; font-weight: bold; color: #3b82f6;">2</div>
+                            <div style="font-size: 11px; color: #6b7280;">总插件数</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 25%; text-align: center; padding: 16px; background: #f0fdf4; border-top: 4px solid #10b981;">
+                            <div style="font-size: 28px; font-weight: bold; color: #10b981;">2</div>
+                            <div style="font-size: 11px; color: #6b7280;">构建成功</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 25%; text-align: center; padding: 16px; background: #fef2f2; border-top: 4px solid #ef4444;">
+                            <div style="font-size: 28px; font-weight: bold; color: #ef4444;">0</div>
+                            <div style="font-size: 11px; color: #6b7280;">构建失败</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td
+                            style="width: 25%; text-align: center; padding: 16px; background: #fffbeb; border-top: 4px solid #f59e0b;">
+                            <div style="font-size: 28px; font-weight: bold; color: #f59e0b;">45.5s</div>
+                            <div style="font-size: 11px; color: #6b7280;">总耗时</div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Progress Bar -->
+                <div style="margin-top: 16px;">
+                    <div
+                        style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 4px;">
+                        <span>成功率</span>
+                        <span>100%</span>
+                    </div>
+                    <div style="height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden;">
+                        <div style="height: 100%; width: 100%; background: #10b981;"></div>
+                    </div>
+                </div>
+            </td>
+        </tr>
+
+        <!-- Skipped Plugins Warning -->
+        <tr>
+            <td style="padding: 0 24px 16px;">
+                <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px;">
+                    <div style="font-weight: 600; color: #92400e; margin-bottom: 8px;">⚠️ 17 个插件因配置不完整被跳过</div>
+                    <div style="font-size: 12px; color: #78350f;">
+                        plugin-ai-knowledge-base, plugin-deep-research, plugin-device-tree-selector,
+                        plugin-integration-workflow,
+                        plugin-knowledge-graph, plugin-media-server-config, plugin-message-queue, plugin-pdf-viewer-ocr,
+                        plugin-player, plugin-rag, plugin-sie-comm-hub, plugin-speech-service-center,
+                        plugin-speech-to-text,
+                        plugin-video-capture, plugin-video-meeting, plugin-video-player, plugin-video-talk
+                    </div>
+                    <div style="font-size: 11px; color: #b45309; margin-top: 8px;">
+                        请完善 package.json 中的 huaiye.userCategory 字段
+                    </div>
+                </div>
+            </td>
+        </tr>
+
+        <!-- Plugin Table -->
+        <tr>
+            <td style="padding: 0 24px 24px;">
+                <div
+                    style="font-size: 16px; font-weight: 600; color: #1f2937; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">
+                    插件构建详情</div>
+                <table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+                    <tr style="background: #f9fafb;">
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            插件名称</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            版本</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            状态</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            错误信息</th>
+                        <th
+                            style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">
+                            耗时</th>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #3b82f6; font-weight: 500;">
+                            @huaiye/plugin-agent-chat</td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+                            2.0.0-alpha.43.20260206.122500</td>
+                        <td
+                            style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 18px;">
+                            ✅</td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 11px; color: #6b7280;">-
+                        </td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+                            22s</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #3b82f6; font-weight: 500;">
+                            @huaiye/plugin-llm-chat</td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+                            2.0.0-alpha.43.20260206.122500</td>
+                        <td
+                            style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 18px;">
+                            ✅</td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 11px; color: #6b7280;">-
+                        </td>
+                        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">
+                            23.5s</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+            <td style="background: #f9fafb; padding: 16px; text-align: center;">
+                <a href="#"
+                    style="display: inline-block; background: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500;">查看完整构建日志</a>
+                <p style="margin: 12px 0 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI - Yuezhuo 插件构建系统
+                </p>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>
