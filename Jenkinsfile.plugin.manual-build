@@ -81,6 +81,11 @@ pipeline {
             defaultValue: false,
             description: '忽略复选框，打包所有插件'
         )
+        string(
+            name: 'EMAIL_RECIPIENTS',
+            defaultValue: 'wangting@huaiye.com.cn',
+            description: '邮件收件人（多个用逗号分隔）'
+        )
     }
 
     environment {
@@ -229,10 +234,11 @@ pipeline {
                         def exists = sh(script: "test -f ${packageJsonPath} && echo 'yes' || echo 'no'", returnStdout: true).trim()
                         
                         if (exists == 'yes') {
-                            // 使用 jq 检查 huaiye 字段及其子字段是否存在且非空
+                            // 使用 jq 检查 name 字段和 huaiye 字段及其子字段是否存在且非空
                             def validationResult = sh(
                                 script: """
                                     jq -e '
+                                        (.name | type == "string" and startswith("@huaiye/")) and
                                         .huaiye != null and
                                         (.huaiye.pluginCode | type == "string" and length > 0) and
                                         (.huaiye.mgmtCategory | type == "string" and length > 0) and
@@ -260,11 +266,26 @@ pipeline {
                                     ['lifecycle', 'string']
                                 ]
                                 
-                                // 检查 huaiye 字段是否存在
-                                def hasHuaiye = sh(
-                                    script: "jq -e '.huaiye != null' ${packageJsonPath} > /dev/null 2>&1 && echo 'yes' || echo 'no'",
+                                // 首先检查 name 字段是否以 @huaiye/ 开头
+                                def nameValid = sh(
+                                    script: "jq -e '.name | type == \"string\" and startswith(\"@huaiye/\")' ${packageJsonPath} > /dev/null 2>&1 && echo 'yes' || echo 'no'",
                                     returnStdout: true
                                 ).trim()
+                                
+                                if (nameValid == 'no') {
+                                    def actualName = sh(
+                                        script: "jq -r '.name // \"(未设置)\"' ${packageJsonPath}",
+                                        returnStdout: true
+                                    ).trim()
+                                    invalidPlugins.add("${plugin} (name 字段必须以 @huaiye/ 开头，当前值: ${actualName})")
+                                    echo "❌ ${plugin}: name 字段必须以 @huaiye/ 开头，当前值: ${actualName}"
+                                }
+                                // 检查 huaiye 字段是否存在
+                                else {
+                                    def hasHuaiye = sh(
+                                        script: "jq -e '.huaiye != null' ${packageJsonPath} > /dev/null 2>&1 && echo 'yes' || echo 'no'",
+                                        returnStdout: true
+                                    ).trim()
                                 
                                 if (hasHuaiye == 'no') {
                                     invalidPlugins.add("${plugin} (缺少 huaiye 字段)")
@@ -290,6 +311,7 @@ pipeline {
                                     invalidPlugins.add("${plugin} (字段缺失或为空: ${missingFields.join(', ')})")
                                     echo "❌ ${plugin}: 字段缺失或为空: ${missingFields.join(', ')}"
                                 }
+                                }  // 闭合 else (nameValid)
                             }
                         } else {
                             invalidPlugins.add("${plugin} (package.json 不存在)")
@@ -332,6 +354,8 @@ pipeline {
                     def successCount = 0
                     def failedPlugins = []
                     def buildTimestamp = new Date().format('yyyyMMdd.HHmmss')
+                    def pluginResults = []  // 收集每个插件的构建结果
+                    def buildStartTime = System.currentTimeMillis()
                     
                     dir(env.YUEZHUO_DIR) {
                         // 清理旧的 tar 制品，避免归档时包含旧文件
@@ -347,9 +371,20 @@ pipeline {
                             
                             def fullName = "@huaiye/${plugin}"
                             def pluginPath = "packages/plugins/@huaiye/${plugin}"
+                            def pluginStartTime = System.currentTimeMillis()
+                            def pluginVersion = "unknown"
+                            def pluginError = ""
+                            def pluginStatus = "success"
+                            
                             echo "======== 开始处理: ${fullName} ========"
                             
                             try {
+                                // 获取版本号
+                                pluginVersion = sh(
+                                    script: "cat ${pluginPath}/package.json | grep '\"version\"' | head -1 | sed 's/.*\"version\": \"\\([^\"]*\\)\".*/\\1/'",
+                                    returnStdout: true
+                                ).trim()
+                                
                                 // 0. 修改版本号（追加时间戳）
                                 sh """
                                     cd ${pluginPath}
@@ -369,6 +404,8 @@ pipeline {
                                     grep '"version"' package.json
                                 """
                                 
+                                pluginVersion = "${pluginVersion}.${buildTimestamp}"
+                                
                                 // 1. 创建/注册插件
                                 sh "yarn pm create ${fullName} || true"
                                 
@@ -382,13 +419,30 @@ pipeline {
                                 echo "✅ ${fullName} 打包成功"
                             } catch (Exception e) {
                                 failedPlugins.add(plugin)
+                                pluginStatus = "failed"
+                                pluginError = e.message?.take(100) ?: "Unknown error"
                                 echo "❌ ${fullName} 打包失败: ${e.message}"
                             }
+                            
+                            def pluginDuration = (System.currentTimeMillis() - pluginStartTime) / 1000
+                            pluginResults.add([
+                                name: fullName,
+                                version: pluginVersion,
+                                status: pluginStatus,
+                                error: pluginError,
+                                duration: pluginDuration as int
+                            ])
                         }
                     }
                     
+                    def totalDuration = (System.currentTimeMillis() - buildStartTime) / 1000
+                    
                     env.SUCCESS_COUNT = successCount.toString()
                     env.FAILED_PLUGINS = failedPlugins.join(',')
+                    env.TOTAL_DURATION = totalDuration.toString()
+                    
+                    // 保存插件结果为 JSON 供报告使用
+                    env.PLUGIN_RESULTS = groovy.json.JsonOutput.toJson(pluginResults)
                     
                     echo "======== 构建结果 ========"
                     echo "成功: ${successCount} 个"
@@ -452,9 +506,375 @@ EOF
                 }
             }
         }
+        
+        stage('生成报告') {
+            steps {
+                script {
+                    def buildTime = new Date().format('yyyy-MM-dd HH:mm:ss')
+                    def pluginCount = env.PLUGIN_COUNT?.toInteger() ?: 0
+                    def successCount = env.SUCCESS_COUNT?.toInteger() ?: 0
+                    def failedCount = pluginCount - successCount
+                    def successRate = pluginCount > 0 ? Math.round(successCount * 100.0 / pluginCount) : 0
+                    def totalDuration = env.TOTAL_DURATION ?: "0"
+                    
+                    // 格式化耗时
+                    def durationSec = totalDuration.toDouble()
+                    def durationStr = durationSec >= 60 ? "${(durationSec / 60).intValue()}m ${(durationSec % 60).intValue()}s" : "${durationSec.intValue()}s"
+                    
+                    // 解析插件结果（转为可序列化的普通列表）
+                    def pluginResults = []
+                    try {
+                        def parsed = new groovy.json.JsonSlurper().parseText(env.PLUGIN_RESULTS ?: '[]')
+                        // 转换为普通的可序列化 Map
+                        pluginResults = parsed.collect { item ->
+                            [
+                                name: item.name?.toString() ?: '',
+                                version: item.version?.toString() ?: '',
+                                status: item.status?.toString() ?: '',
+                                error: item.error?.toString() ?: '',
+                                duration: item.duration as int
+                            ]
+                        }
+                    } catch (Exception e) {
+                        echo "解析插件结果失败: ${e.message}"
+                    }
+                    
+                    // 生成插件行的 HTML
+                    def pluginRowsHtml = pluginResults.collect { p ->
+                        def statusClass = p.status == 'success' ? 'status-success' : 'status-failed'
+                        def statusText = p.status == 'success' ? '✓ 成功' : '✗ 失败'
+                        def logPeek = p.status == 'success' ? '构建成功' : p.error
+                        def logStyle = p.status == 'failed' ? 'color: #ef4444;' : ''
+                        """
+                        <tr>
+                            <td><span class="plugin-name">${p.name}</span></td>
+                            <td>${p.version}</td>
+                            <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                            <td><div class="log-peek" style="${logStyle}">${logPeek}</div></td>
+                            <td>${p.duration}s</td>
+                        </tr>
+                        """
+                    }.join('')
+                    
+                    // 生成 HTML 报告
+                    def htmlReport = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yuezhuo 插件构建报告 #${env.BUILD_NUMBER}</title>
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --success-color: #10b981;
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-main: #1f2937;
+            --text-secondary: #6b7280;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0; padding: 20px; line-height: 1.5;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header-card {
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            color: white; padding: 30px; border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            margin-bottom: 24px; display: flex;
+            justify-content: space-between; align-items: center;
+        }
+        .header-project h1 { margin: 0; font-size: 24px; font-weight: 600; }
+        .header-project p { margin: 8px 0 0; opacity: 0.9; font-size: 14px; }
+        .build-badge {
+            background-color: rgba(255,255,255,0.2);
+            padding: 8px 16px; border-radius: 20px;
+            font-weight: 500; backdrop-filter: blur(4px);
+        }
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 20px; margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--card-bg); padding: 20px; border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            text-align: center; border-top: 4px solid transparent;
+        }
+        .stat-card.total { border-color: var(--primary-color); }
+        .stat-card.success { border-color: var(--success-color); }
+        .stat-card.failed { border-color: var(--danger-color); }
+        .stat-card.duration { border-color: var(--warning-color); }
+        .stat-value { font-size: 32px; font-weight: 700; margin: 10px 0; }
+        .stat-label { color: var(--text-secondary); font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .main-card {
+            background: var(--card-bg); border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            padding: 24px; margin-bottom: 24px;
+        }
+        .card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding-bottom: 16px; border-bottom: 1px solid #e5e7eb; margin-bottom: 20px;
+        }
+        .card-title { font-size: 18px; font-weight: 600; color: var(--text-main); }
+        .plugin-table { width: 100%; border-collapse: collapse; }
+        .plugin-table th {
+            text-align: left; padding: 12px; background-color: #f9fafb;
+            color: var(--text-secondary); font-size: 13px; font-weight: 600;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .plugin-table td { padding: 14px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+        .plugin-name { font-weight: 500; color: var(--primary-color); }
+        .status-badge {
+            display: inline-flex; align-items: center;
+            padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 500;
+        }
+        .status-success { background-color: #d1fae5; color: #065f46; }
+        .status-failed { background-color: #fee2e2; color: #991b1b; }
+        .log-peek {
+            font-family: 'Courier New', monospace; font-size: 12px;
+            color: var(--text-secondary); background: #f9fafb;
+            padding: 8px; border-radius: 4px; max-width: 400px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .progress-container {
+            height: 8px; background-color: #e5e7eb; border-radius: 4px;
+            margin-top: 10px; overflow: hidden;
+        }
+        .progress-bar { height: 100%; background-color: var(--success-color); transition: width 0.5s ease; }
+        .footer { text-align: center; color: var(--text-secondary); font-size: 12px; margin-top: 40px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-card">
+            <div class="header-project">
+                <h1>📦 Yuezhuo 插件构建报告</h1>
+                <p>构建任务: #${env.BUILD_NUMBER} &bull; ${buildTime}</p>
+            </div>
+            <div class="build-badge">
+                分支: ${params.PLUGINS_BRANCH ?: 'master'}
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card total">
+                <div class="stat-value" style="color: var(--primary-color)">${pluginCount}</div>
+                <div class="stat-label">总插件数</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-value" style="color: var(--success-color)">${successCount}</div>
+                <div class="stat-label">构建成功</div>
+            </div>
+            <div class="stat-card failed">
+                <div class="stat-value" style="color: var(--danger-color)">${failedCount}</div>
+                <div class="stat-label">构建失败</div>
+            </div>
+            <div class="stat-card duration">
+                <div class="stat-value" style="color: var(--warning-color)">${durationStr}</div>
+                <div class="stat-label">总耗时</div>
+            </div>
+        </div>
+        
+        <div class="main-card">
+            <div class="card-header">
+                <div class="card-title">插件构建详情</div>
+                <div style="font-size: 14px; color: var(--text-secondary);">
+                    成功率: ${successRate}%
+                </div>
+            </div>
+            <div class="progress-container">
+                <div class="progress-bar" style="width: ${successRate}%"></div>
+            </div>
+            <table class="plugin-table" style="margin-top: 20px;">
+                <thead>
+                    <tr>
+                        <th>插件名称</th>
+                        <th>版本</th>
+                        <th>状态</th>
+                        <th style="width: 40%">日志摘要 / 错误原因</th>
+                        <th>耗时</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pluginRowsHtml}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="footer">
+            Generated by Jenkins CI &bull; Yuezhuo Plugin Build System
+            <br><a href="${env.BUILD_URL}" style="color: var(--primary-color);">查看完整构建日志</a>
+        </div>
+    </div>
+</body>
+</html>"""
+                    
+                    // 保存报告到工作目录
+                    writeFile file: "${env.YUEZHUO_DIR}/build-report.html", text: htmlReport
+                    
+                    // 归档报告
+                    archiveArtifacts artifacts: "${env.YUEZHUO_DIR}/build-report.html", allowEmptyArchive: true
+                    
+                    // 保存邮件内容供 post 阶段使用
+                    env.EMAIL_SUBJECT = "Yuezhuo 插件构建报告 #${env.BUILD_NUMBER} - ${failedCount > 0 ? '部分失败' : '全部成功'}"
+                    env.BUILD_REPORT_PATH = "${env.YUEZHUO_DIR}/build-report.html"
+                    
+                    echo "构建报告已生成: ${env.BUILD_REPORT_PATH}"
+                }
+            }
+        }
     }
 
     post {
+        always {
+            script {
+                def failedCount = (env.PLUGIN_COUNT?.toInteger() ?: 0) - (env.SUCCESS_COUNT?.toInteger() ?: 0)
+                def statusEmoji = failedCount > 0 ? '⚠️' : '✅'
+                def statusText = failedCount > 0 ? '部分失败' : '全部成功'
+                
+                // 发送邮件
+                try {
+                    // 生成邮件版的插件表格行（使用内联样式）
+                    // 注意: 使用 JsonSlurper 后立即处理完毕，不保留 LazyMap 引用
+                    def emailPluginRows = ''
+                    def pluginResultsJson = env.PLUGIN_RESULTS ?: '[]'
+                    if (pluginResultsJson && pluginResultsJson != '[]') {
+                        try {
+                            // 直接在一个表达式中完成解析和转换，避免保留 LazyMap 引用
+                            emailPluginRows = new groovy.json.JsonSlurper().parseText(pluginResultsJson).collect { item ->
+                                def name = item.name?.toString() ?: ''
+                                def version = item.version?.toString() ?: ''  
+                                def status = item.status?.toString() ?: 'unknown'
+                                def error = item.error?.toString() ?: ''
+                                def duration = item.duration?.toString() ?: '0'
+                                def statusIcon = status == 'success' ? '✅' : '❌'
+                                def errorText = status == 'success' ? '-' : (error.take(50) ?: 'Unknown error')
+                                """
+                            <tr>
+                                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: #3b82f6; font-weight: 500;">${name}</td>
+                                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">${version}</td>
+                                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 18px;">${statusIcon}</td>
+                                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 11px; color: #6b7280; font-family: monospace;">${errorText}</td>
+                                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280;">${duration}s</td>
+                            </tr>
+                                """
+                            }.join('') // 立即 join 成字符串，GC 会回收 LazyMap
+                        } catch (Exception pe) {
+                            echo "Plugin data parsing error: ${pe.message}"
+                            emailPluginRows = '<tr><td colspan="5" style="padding: 12px; text-align: center; color: #6b7280;">Plugin data unavailable</td></tr>'
+                        }
+                    } else {
+                        emailPluginRows = '<tr><td colspan="5" style="padding: 12px; text-align: center; color: #6b7280;">No plugin data</td></tr>'
+                    }
+                    
+                    def totalCount = env.PLUGIN_COUNT?.toInteger() ?: 0
+                    def successCountVal = env.SUCCESS_COUNT?.toInteger() ?: 0
+                    def successRateVal = totalCount > 0 ? Math.round(successCountVal * 100.0 / totalCount) : 0
+                    def durationVal = env.TOTAL_DURATION ?: '0'
+                    
+                    emailext(
+                        to: params.EMAIL_RECIPIENTS ?: 'wangting@huaiye.com.cn',
+                        subject: "${statusEmoji} Yuezhuo Plugin Build #${env.BUILD_NUMBER} - ${statusText}",
+                        mimeType: 'text/html',
+                        recipientProviders: [
+                            [$class: 'RequesterRecipientProvider']
+                        ],
+                        body: """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+</head>
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f3f4f6;">
+    <table cellpadding="0" cellspacing="0" style="max-width: 700px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <!-- Header -->
+        <tr>
+            <td style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 24px;">
+                <h1 style="margin: 0; font-size: 22px;">Yuezhuo Plugin Build Report</h1>
+                <p style="margin: 8px 0 0; opacity: 0.9; font-size: 14px;">Build #${env.BUILD_NUMBER} - ${new Date().format('yyyy-MM-dd HH:mm:ss')} - Branch: ${params.PLUGINS_BRANCH ?: 'master'}</p>
+            </td>
+        </tr>
+        
+        <!-- Stats -->
+        <tr>
+            <td style="padding: 24px;">
+                <table cellpadding="0" cellspacing="0" style="width: 100%;">
+                    <tr>
+                        <td style="width: 25%; text-align: center; padding: 16px; background: #eff6ff; border-top: 4px solid #3b82f6;">
+                            <div style="font-size: 28px; font-weight: bold; color: #3b82f6;">${totalCount}</div>
+                            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">TOTAL</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td style="width: 25%; text-align: center; padding: 16px; background: #f0fdf4; border-top: 4px solid #10b981;">
+                            <div style="font-size: 28px; font-weight: bold; color: #10b981;">${successCountVal}</div>
+                            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">SUCCESS</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td style="width: 25%; text-align: center; padding: 16px; background: #fef2f2; border-top: 4px solid #ef4444;">
+                            <div style="font-size: 28px; font-weight: bold; color: #ef4444;">${failedCount}</div>
+                            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">FAILED</div>
+                        </td>
+                        <td style="width: 4px;"></td>
+                        <td style="width: 25%; text-align: center; padding: 16px; background: #fffbeb; border-top: 4px solid #f59e0b;">
+                            <div style="font-size: 28px; font-weight: bold; color: #f59e0b;">${durationVal}s</div>
+                            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">DURATION</div>
+                        </td>
+                    </tr>
+                </table>
+                
+                <!-- Progress Bar -->
+                <div style="margin-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 4px;">
+                        <span>Success Rate</span>
+                        <span>${successRateVal}%</span>
+                    </div>
+                    <div style="height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden;">
+                        <div style="height: 100%; width: ${successRateVal}%; background: #10b981;"></div>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        
+        <!-- Plugin Table -->
+        <tr>
+            <td style="padding: 0 24px 24px;">
+                <div style="font-size: 16px; font-weight: 600; color: #1f2937; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">Plugin Details</div>
+                <table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+                    <tr style="background: #f9fafb;">
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Plugin</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Version</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Status</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Error</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Time</th>
+                    </tr>
+                    ${emailPluginRows}
+                </table>
+            </td>
+        </tr>
+        
+        <!-- Footer -->
+        <tr>
+            <td style="background: #f9fafb; padding: 16px; text-align: center;">
+                <a href="${env.BUILD_URL}" style="display: inline-block; background: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500;">View Build Log</a>
+                <p style="margin: 12px 0 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI - Yuezhuo Plugin Build System</p>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+                        """
+                    )
+                    echo "Email sent successfully"
+                } catch (Exception e) {
+                    echo "Email failed: ${e.message}"
+                }
+            }
+        }
         success {
             echo """
             ========================================
@@ -463,6 +883,7 @@ EOF
             构建号: ${env.BUILD_NUMBER}
             成功打包: ${env.SUCCESS_COUNT} 个插件
             制品目录: ${env.ARTIFACTS_DIR}
+            报告: ${env.BUILD_REPORT_PATH}
             ========================================
             """
         }
