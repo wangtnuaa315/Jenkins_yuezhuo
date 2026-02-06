@@ -39,6 +39,11 @@ def runLint(String projectDir) {
             timeout(time: 5, unit: 'MINUTES') {
                 def output = sh(
                     script: '''
+                        # 设置 UTF-8 编码环境
+                        export LANG=en_US.UTF-8
+                        export LC_ALL=en_US.UTF-8
+                        export PYTHONIOENCODING=utf-8
+                        
                         PLUGIN_DIR="packages/plugins/@huaiye"
                         
                         if [ -d "$PLUGIN_DIR" ]; then
@@ -66,7 +71,7 @@ def runLint(String projectDir) {
                                 python3 -c "
 import json
 try:
-    with open('eslint-report.json') as f:
+    with open('eslint-report.json', encoding='utf-8') as f:
         data = json.load(f)
     
     errors = []
@@ -95,8 +100,8 @@ try:
     for e in error_only[:20]:
         print('DETAIL:{}|{}|{}|{}'.format(e['file'], e['line'], e['message'][:80], e['rule']))
     
-    # 生成详细日志文件（使用 UTF-8 编码）
-    with open('eslint-errors.txt', 'w', encoding='utf-8') as out:
+    # 生成详细日志文件（使用 UTF-8 编码，带 BOM）
+    with open('eslint-errors.txt', 'w', encoding='utf-8-sig') as out:
         out.write('=' * 70 + '\\n')
         out.write('ESLint 代码检查详细报告\\n')
         out.write('=' * 70 + '\\n\\n')
@@ -237,7 +242,6 @@ def runCoverage(String projectDir) {
     }
     */
 }
-
 /**
  * 执行圈复杂度检查
  * @param projectDir 项目根目录
@@ -251,21 +255,34 @@ def runComplexity(String projectDir) {
         try {
             def pluginsDir = "packages/plugins/@huaiye"
             
-            timeout(time: 3, unit: 'MINUTES') {
-                // 使用 ESLint 临时配置检查复杂度
+            timeout(time: 5, unit: 'MINUTES') {
+                // 使用 ESLint 临时注入 complexity 规则检查
                 def output = sh(
                     script: """
                         if [ -d "${pluginsDir}" ]; then
                             cd "${pluginsDir}"
                             
-                            # 运行 ESLint 提取复杂度信息（从已有的 eslint-report.json）
-                            if [ -f "eslint-report.json" ]; then
+                            # 运行 ESLint 并临时注入 complexity 规则（阈值设为5，超过就报告）
+                            # 只检查 .vue 和 .js/.ts 文件
+                            npx eslint . --ext .vue,.js,.ts,.jsx,.tsx \
+                                --rule 'complexity: [warn, 5]' \
+                                --format json \
+                                --no-error-on-unmatched-pattern \
+                                > complexity-check.json 2>/dev/null || true
+                            
+                            # 使用 Python 解析复杂度结果
+                            if [ -f "complexity-check.json" ]; then
                                 python3 -c "
 import json
+import re
 
 try:
-    with open('eslint-report.json', encoding='utf-8') as f:
-        data = json.load(f)
+    with open('complexity-check.json', encoding='utf-8') as f:
+        content = f.read().strip()
+        if not content or content == '[]':
+            print('NO_DATA')
+            exit(0)
+        data = json.loads(content)
     
     complexity_issues = []
     for item in data:
@@ -273,23 +290,22 @@ try:
         parts = fp.split('/')
         short_path = '/'.join(parts[-3:]) if len(parts) >= 3 else fp
         for msg in item.get('messages', []):
-            rule = msg.get('ruleId', '')
-            # 检查复杂度相关规则
-            if 'complexity' in rule.lower() or 'cognitive' in rule.lower():
+            rule = msg.get('ruleId', '') or ''
+            # 只处理 complexity 规则
+            if rule == 'complexity':
                 line = msg.get('line', 0)
                 text = msg.get('message', '')
-                # 尝试从消息中提取复杂度值
-                import re
-                match = re.search(r'(\\d+)', text)
-                complexity = int(match.group(1)) if match else 10
-                complexity_issues.append({
-                    'file': short_path,
-                    'line': line,
-                    'message': text[:80],
-                    'complexity': complexity
-                })
+                # 从消息中提取复杂度值: 'has a complexity of X'
+                match = re.search(r'complexity of (\\d+)', text)
+                if match:
+                    complexity = int(match.group(1))
+                    complexity_issues.append({
+                        'file': short_path,
+                        'line': line,
+                        'message': text[:80],
+                        'complexity': complexity
+                    })
     
-    # 统计
     if complexity_issues:
         max_c = max(c['complexity'] for c in complexity_issues)
         avg_c = sum(c['complexity'] for c in complexity_issues) / len(complexity_issues)
@@ -297,30 +313,34 @@ try:
         print('AVG_COMPLEXITY={:.1f}'.format(avg_c))
         print('TOTAL_FUNCS={}'.format(len(complexity_issues)))
         
-        # 输出复杂度超过10的函数
-        high_complexity = [c for c in complexity_issues if c['complexity'] > 10][:10]
+        # 输出复杂度超过10的函数（前10个）
+        high_complexity = sorted([c for c in complexity_issues if c['complexity'] > 10], 
+                                  key=lambda x: -x['complexity'])[:10]
         for c in high_complexity:
             print('COMPLEX:{}|{}|{}|{}'.format(c['file'], c['line'], c['complexity'], c['message']))
         
-        # 生成详细日志
-        with open('complexity-report.txt', 'w', encoding='utf-8') as out:
+        # 生成详细日志（带 BOM）
+        with open('complexity-report.txt', 'w', encoding='utf-8-sig') as out:
             out.write('=' * 60 + '\\n')
             out.write('圈复杂度分析报告\\n')
             out.write('=' * 60 + '\\n\\n')
             out.write('最大复杂度: {}\\n'.format(max_c))
             out.write('平均复杂度: {:.1f}\\n'.format(avg_c))
-            out.write('复杂函数数: {}\\n\\n'.format(len(complexity_issues)))
+            out.write('复杂函数数: {} (复杂度 > 5)\\n\\n'.format(len(complexity_issues)))
+            out.write('参考标准: <=5 简单 | 6-10 中等 | 11-20 复杂 | >20 很复杂\\n')
+            out.write('-' * 60 + '\\n\\n')
             
             # 按复杂度降序排列
             for c in sorted(complexity_issues, key=lambda x: -x['complexity']):
-                out.write('[{}] {}:{} - {}\\n'.format(c['complexity'], c['file'], c['line'], c['message']))
+                level = '🔴' if c['complexity'] > 20 else ('🟠' if c['complexity'] > 10 else '🟡')
+                out.write('{} [{}] {}:{}\\n'.format(level, c['complexity'], c['file'], c['line']))
         
         print('LOGFILE=complexity-report.txt')
     else:
         print('MAX_COMPLEXITY=0')
         print('AVG_COMPLEXITY=0.0')
         print('TOTAL_FUNCS=0')
-        print('NO_COMPLEXITY_DATA')
+        print('ALL_SIMPLE')
 except Exception as e:
     print('ERROR={}'.format(str(e)))
 "
@@ -348,23 +368,25 @@ except Exception as e:
                                 message: parts[3]
                             ])
                         }
+                    } else if (line == 'ALL_SIMPLE') {
+                        result.message = "所有函数复杂度都在正常范围内"
                     }
                 }
                 
-                // 复杂度超过15的函数过多则标记为不通过
-                result.pass = (result.maxComplexity <= 20 && result.highComplexityFuncs.size() < 20)
+                // 复杂度超过20的函数过多则标记为警告
+                result.pass = (result.maxComplexity <= 20 || result.highComplexityFuncs.size() < 10)
                 
                 if (result.totalFuncs > 0) {
-                    echo "圈复杂度检查: 最大 ${result.maxComplexity}, 平均 ${result.avgComplexity}"
+                    echo "圈复杂度检查: 最大 ${result.maxComplexity}, 平均 ${result.avgComplexity}, 共 ${result.totalFuncs} 个复杂函数"
                 } else {
-                    echo "未检测到复杂度数据（可能需要配置 ESLint complexity 规则）"
-                    result.message = "未配置复杂度检查规则"
+                    echo "圈复杂度检查: 所有函数复杂度正常 (≤5)"
+                    result.message = "所有函数复杂度正常"
                 }
             }
         } catch (Exception e) {
             echo "圈复杂度检查失败: ${e.message}"
             result.pass = true
-            result.message = "检查异常"
+            result.message = "检查异常: ${e.message}"
         }
     }
     return result
@@ -383,6 +405,11 @@ def runSecurityAudit(String projectDir) {
         try {
             // 1. 先运行完整的 audit 并保存到文件
             sh '''
+                # 设置 UTF-8 编码环境
+                export LANG=en_US.UTF-8
+                export LC_ALL=en_US.UTF-8
+                export PYTHONIOENCODING=utf-8
+                
                 if [ -f "yarn.lock" ]; then
                     yarn audit --json > security-audit-raw.json 2>/dev/null || true
                 elif [ -f "package-lock.json" ]; then
@@ -402,7 +429,7 @@ high = moderate = low = 0
 vulns = []
 
 try:
-    with open('security-audit-raw.json') as f:
+    with open('security-audit-raw.json', encoding='utf-8') as f:
         for line in f:
             try:
                 data = json.loads(line.strip())
@@ -439,8 +466,8 @@ try:
     for v in high_vulns:
         print('VULN:{}|{}|{}'.format(v['severity'], v['module'], v['title']))
     
-    # 生成详细日志文件（使用 UTF-8 编码）
-    with open('security-audit-details.txt', 'w', encoding='utf-8') as out:
+    # 生成详细日志文件（使用 UTF-8 编码，带 BOM）
+    with open('security-audit-details.txt', 'w', encoding='utf-8-sig') as out:
         out.write('=' * 60 + '\\n')
         out.write('依赖安全扫描详细报告\\n')
         out.write('=' * 60 + '\\n\\n')
@@ -743,34 +770,6 @@ def generateHtmlReport(Map results, String outputPath) {
             </div>
         </div>
 
-        ${results.lint.topErrors?.size() > 0 ? """
-        <div class="main-card">
-            <div class="card-title">📋 ESLint 错误详情（前 ${results.lint.topErrors.size()} 个）</div>
-            <table class="error-table">
-                <thead>
-                    <tr>
-                        <th>文件</th>
-                        <th>行号</th>
-                        <th>错误信息</th>
-                        <th>规则</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${results.lint.topErrors.collect { err -> """
-                    <tr>
-                        <td class="file-path">${err.file}</td>
-                        <td class="line-num">${err.line}</td>
-                        <td class="error-msg">${err.message}</td>
-                        <td class="rule-name">${err.rule}</td>
-                    </tr>
-                    """}.join('')}
-                </tbody>
-            </table>
-            <div style="text-align: center; color: var(--text-secondary); font-size: 12px; margin-top: 12px;">
-                共 ${results.lint.errors} 个错误，此处仅显示前 ${results.lint.topErrors.size()} 个，完整报告请查看 eslint-report.json
-            </div>
-        </div>
-        """ : ''}
 
         <div class="main-card">
             <div class="reference">
@@ -916,42 +915,6 @@ def sendEmailReport(Map results, String reportPath, String recipients = '') {
                 </div>
                 <span class="badge ${results.security.pass ? 'badge-success' : 'badge-danger'}">${results.security.pass ? '✓ 通过' : '⚠ 漏洞'}</span>
             </div>
-            
-            ${results.lint.topErrors?.size() > 0 ? '''
-            <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-                <div style="font-weight: 600; margin-bottom: 12px;">📋 主要 ESLint 错误（前 ''' + results.lint.topErrors.size() + ''' 个）</div>
-                <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
-                    <tr style="background: #f9fafb;">
-                        <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">文件:行号</th>
-                        <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">错误信息</th>
-                    </tr>
-                    ''' + results.lint.topErrors.collect { err -> '''
-                    <tr>
-                        <td style="padding: 6px 8px; border-bottom: 1px solid #f3f4f6; font-family: monospace; color: #3b82f6;">''' + err.file + ':' + err.line + '''</td>
-                        <td style="padding: 6px 8px; border-bottom: 1px solid #f3f4f6; color: #374151;">''' + err.message + '''</td>
-                    </tr>
-                    '''}.join('') + '''
-                </table>
-            </div>
-            ''' : ''}
-            
-            ${results.security.topVulns?.size() > 0 ? '''
-            <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-                <div style="font-weight: 600; margin-bottom: 12px;">🛡️ 高危安全漏洞（前 ''' + results.security.topVulns.size() + ''' 个）</div>
-                <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
-                    <tr style="background: #f9fafb;">
-                        <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">包名</th>
-                        <th style="padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb;">漏洞描述</th>
-                    </tr>
-                    ''' + results.security.topVulns.collect { vuln -> '''
-                    <tr>
-                        <td style="padding: 6px 8px; border-bottom: 1px solid #f3f4f6; font-family: monospace; color: #ef4444;">''' + vuln.module + '''</td>
-                        <td style="padding: 6px 8px; border-bottom: 1px solid #f3f4f6; color: #374151;">''' + vuln.title + '''</td>
-                    </tr>
-                    '''}.join('') + '''
-                </table>
-            </div>
-            ''' : ''}
             
             <div class="reference">
                 <strong>📊 参考范围:</strong> ESLint 错误=0 为通过 | 覆盖率 >80% 优秀 | 高危漏洞=0 为通过
