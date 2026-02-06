@@ -222,7 +222,8 @@ pipeline {
             steps {
                 script {
                     def plugins = env.PLUGIN_LIST.split('\n')
-                    def invalidPlugins = []
+                    def invalidPlugins = []  // 格式: [[name: 'plugin-xxx', reason: '原因'], ...]
+                    def validPlugins = []
                     
                     echo "======== 校验插件 package.json 配置（非空校验）========"
                     
@@ -253,8 +254,10 @@ pipeline {
                             
                             if (validationResult == 'valid') {
                                 echo "✅ ${plugin}: 配置正确"
+                                validPlugins.add(plugin)
                             } else {
                                 // 获取详细的错误信息
+                                def errorReason = ""
                                 def missingFields = []
                                 
                                 def fields = [
@@ -277,8 +280,8 @@ pipeline {
                                         script: "jq -r '.name // \"(未设置)\"' ${packageJsonPath}",
                                         returnStdout: true
                                     ).trim()
-                                    invalidPlugins.add("${plugin} (name 字段必须以 @huaiye/ 开头，当前值: ${actualName})")
-                                    echo "❌ ${plugin}: name 字段必须以 @huaiye/ 开头，当前值: ${actualName}"
+                                    errorReason = "name 字段必须以 @huaiye/ 开头，当前值: ${actualName}"
+                                    echo "⚠️ ${plugin}: ${errorReason} [已跳过]"
                                 }
                                 // 检查 huaiye 字段是否存在
                                 else {
@@ -287,49 +290,60 @@ pipeline {
                                         returnStdout: true
                                     ).trim()
                                 
-                                if (hasHuaiye == 'no') {
-                                    invalidPlugins.add("${plugin} (缺少 huaiye 字段)")
-                                    echo "❌ ${plugin}: 缺少 huaiye 字段"
-                                } else {
-                                    for (fieldInfo in fields) {
-                                        def fieldName = fieldInfo[0]
-                                        def fieldType = fieldInfo[1]
-                                        def checkCmd = fieldType == 'array' 
-                                            ? "jq -e '.huaiye.${fieldName} | type == \"array\" and length > 0' ${packageJsonPath}"
-                                            : "jq -e '.huaiye.${fieldName} | type == \"string\" and length > 0' ${packageJsonPath}"
-                                        
-                                        def fieldValid = sh(
-                                            script: "${checkCmd} > /dev/null 2>&1 && echo 'yes' || echo 'no'",
-                                            returnStdout: true
-                                        ).trim()
-                                        
-                                        if (fieldValid == 'no') {
-                                            missingFields.add(fieldName)
+                                    if (hasHuaiye == 'no') {
+                                        errorReason = "缺少 huaiye 字段"
+                                        echo "⚠️ ${plugin}: ${errorReason} [已跳过]"
+                                    } else {
+                                        for (fieldInfo in fields) {
+                                            def fieldName = fieldInfo[0]
+                                            def fieldType = fieldInfo[1]
+                                            def checkCmd = fieldType == 'array' 
+                                                ? "jq -e '.huaiye.${fieldName} | type == \"array\" and length > 0' ${packageJsonPath}"
+                                                : "jq -e '.huaiye.${fieldName} | type == \"string\" and length > 0' ${packageJsonPath}"
+                                            
+                                            def fieldValid = sh(
+                                                script: "${checkCmd} > /dev/null 2>&1 && echo 'yes' || echo 'no'",
+                                                returnStdout: true
+                                            ).trim()
+                                            
+                                            if (fieldValid == 'no') {
+                                                missingFields.add(fieldName)
+                                            }
                                         }
+                                        
+                                        errorReason = "字段缺失或为空: ${missingFields.join(', ')}"
+                                        echo "⚠️ ${plugin}: ${errorReason} [已跳过]"
                                     }
-                                    
-                                    invalidPlugins.add("${plugin} (字段缺失或为空: ${missingFields.join(', ')})")
-                                    echo "❌ ${plugin}: 字段缺失或为空: ${missingFields.join(', ')}"
-                                }
                                 }  // 闭合 else (nameValid)
+                                
+                                invalidPlugins.add([name: plugin, reason: errorReason])
                             }
                         } else {
-                            invalidPlugins.add("${plugin} (package.json 不存在)")
-                            echo "❌ ${plugin}: package.json 文件不存在"
+                            invalidPlugins.add([name: plugin, reason: "package.json 不存在"])
+                            echo "⚠️ ${plugin}: package.json 文件不存在 [已跳过]"
                         }
                     }
+                    
+                    // 保存跳过的插件信息供邮件报告使用
+                    env.SKIPPED_PLUGINS_JSON = groovy.json.JsonOutput.toJson(invalidPlugins)
+                    env.SKIPPED_COUNT = invalidPlugins.size().toString()
                     
                     if (invalidPlugins.size() > 0) {
                         echo """
                         ========================================
-                        ❌ 以下插件配置不完整：
-                        ${invalidPlugins.join('\n')}
+                        ⚠️ 以下 ${invalidPlugins.size()} 个插件配置不完整，已跳过：
+                        ${invalidPlugins.collect { it.name + ' (' + it.reason + ')' }.join('\n')}
                         ========================================
                         """
-                        // 校验失败时中止构建
-                        error "插件配置校验失败，请完善 package.json 中的 huaiye 字段"
+                    }
+                    
+                    if (validPlugins.size() > 0) {
+                        // 更新 PLUGIN_LIST 为通过校验的插件
+                        env.PLUGIN_LIST = validPlugins.join('\n')
+                        env.PLUGIN_COUNT = validPlugins.size().toString()
+                        echo "✅ ${validPlugins.size()} 个插件配置校验通过，将继续构建"
                     } else {
-                        echo "✅ 所有插件配置校验通过"
+                        error "所有插件配置校验失败，无可构建的插件"
                     }
                 }
             }
@@ -771,18 +785,37 @@ EOF
                         emailPluginRows = '<tr><td colspan="5" style="padding: 12px; text-align: center; color: #6b7280;">No plugin data</td></tr>'
                     }
                     
+                    // 解析跳过的插件信息
+                    def skippedPluginRows = ''
+                    def skippedPluginsJson = env.SKIPPED_PLUGINS_JSON ?: '[]'
+                    def skippedCount = env.SKIPPED_COUNT?.toInteger() ?: 0
+                    if (skippedPluginsJson && skippedPluginsJson != '[]' && skippedCount > 0) {
+                        try {
+                            skippedPluginRows = new groovy.json.JsonSlurper().parseText(skippedPluginsJson).collect { item ->
+                                def name = item.name?.toString() ?: ''
+                                def reason = item.reason?.toString() ?: '未知原因'
+                                """
+                            <tr style="background: #fffbeb;">
+                                <td style="padding: 8px 12px; color: #78350f; font-weight: 500;">${name}</td>
+                                <td style="padding: 8px 12px; color: #92400e; font-family: monospace; font-size: 12px;">${reason}</td>
+                            </tr>
+                                """
+                            }.join('')
+                        } catch (Exception se) {
+                            echo "Skipped plugins parsing error: ${se.message}"
+                            skippedPluginRows = ''
+                        }
+                    }
+                    
                     def totalCount = env.PLUGIN_COUNT?.toInteger() ?: 0
                     def successCountVal = env.SUCCESS_COUNT?.toInteger() ?: 0
                     def successRateVal = totalCount > 0 ? Math.round(successCountVal * 100.0 / totalCount) : 0
                     def durationVal = env.TOTAL_DURATION ?: '0'
                     
-                    emailext(
+                    mail(
                         to: params.EMAIL_RECIPIENTS ?: 'wangting@huaiye.com.cn',
                         subject: "${statusEmoji} Yuezhuo Plugin Build #${env.BUILD_NUMBER} - ${statusText}",
                         mimeType: 'text/html',
-                        recipientProviders: [
-                            [$class: 'RequesterRecipientProvider']
-                        ],
                         body: """
 <!DOCTYPE html>
 <html>
@@ -795,8 +828,8 @@ EOF
         <!-- Header -->
         <tr>
             <td style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 24px;">
-                <h1 style="margin: 0; font-size: 22px;">Yuezhuo Plugin Build Report</h1>
-                <p style="margin: 8px 0 0; opacity: 0.9; font-size: 14px;">Build #${env.BUILD_NUMBER} - ${new Date().format('yyyy-MM-dd HH:mm:ss')} - Branch: ${params.PLUGINS_BRANCH ?: 'master'}</p>
+                <h1 style="margin: 0; font-size: 22px;">Yuezhuo 插件构建报告</h1>
+                <p style="margin: 8px 0 0; opacity: 0.9; font-size: 14px;">构建 #${env.BUILD_NUMBER} - ${new Date().format('yyyy-MM-dd HH:mm:ss')} - 分支: ${params.PLUGINS_BRANCH ?: 'master'}</p>
             </td>
         </tr>
         
@@ -805,24 +838,29 @@ EOF
             <td style="padding: 24px;">
                 <table cellpadding="0" cellspacing="0" style="width: 100%;">
                     <tr>
-                        <td style="width: 25%; text-align: center; padding: 16px; background: #eff6ff; border-top: 4px solid #3b82f6;">
-                            <div style="font-size: 28px; font-weight: bold; color: #3b82f6;">${totalCount}</div>
-                            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">TOTAL</div>
+                        <td style="width: 20%; text-align: center; padding: 12px; background: #eff6ff; border-top: 4px solid #3b82f6;">
+                            <div style="font-size: 24px; font-weight: bold; color: #3b82f6;">${totalCount}</div>
+                            <div style="font-size: 10px; color: #6b7280;">构建插件</div>
                         </td>
-                        <td style="width: 4px;"></td>
-                        <td style="width: 25%; text-align: center; padding: 16px; background: #f0fdf4; border-top: 4px solid #10b981;">
-                            <div style="font-size: 28px; font-weight: bold; color: #10b981;">${successCountVal}</div>
-                            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">SUCCESS</div>
+                        <td style="width: 3px;"></td>
+                        <td style="width: 20%; text-align: center; padding: 12px; background: #f0fdf4; border-top: 4px solid #10b981;">
+                            <div style="font-size: 24px; font-weight: bold; color: #10b981;">${successCountVal}</div>
+                            <div style="font-size: 10px; color: #6b7280;">构建成功</div>
                         </td>
-                        <td style="width: 4px;"></td>
-                        <td style="width: 25%; text-align: center; padding: 16px; background: #fef2f2; border-top: 4px solid #ef4444;">
-                            <div style="font-size: 28px; font-weight: bold; color: #ef4444;">${failedCount}</div>
-                            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">FAILED</div>
+                        <td style="width: 3px;"></td>
+                        <td style="width: 20%; text-align: center; padding: 12px; background: #fef2f2; border-top: 4px solid #ef4444;">
+                            <div style="font-size: 24px; font-weight: bold; color: #ef4444;">${failedCount}</div>
+                            <div style="font-size: 10px; color: #6b7280;">构建失败</div>
                         </td>
-                        <td style="width: 4px;"></td>
-                        <td style="width: 25%; text-align: center; padding: 16px; background: #fffbeb; border-top: 4px solid #f59e0b;">
-                            <div style="font-size: 28px; font-weight: bold; color: #f59e0b;">${durationVal}s</div>
-                            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">DURATION</div>
+                        <td style="width: 3px;"></td>
+                        <td style="width: 20%; text-align: center; padding: 12px; background: #fef3c7; border-top: 4px solid #f59e0b;">
+                            <div style="font-size: 24px; font-weight: bold; color: #f59e0b;">${skippedCount}</div>
+                            <div style="font-size: 10px; color: #6b7280;">配置跳过</div>
+                        </td>
+                        <td style="width: 3px;"></td>
+                        <td style="width: 20%; text-align: center; padding: 12px; background: #f3f4f6; border-top: 4px solid #6b7280;">
+                            <div style="font-size: 24px; font-weight: bold; color: #6b7280;">${durationVal}s</div>
+                            <div style="font-size: 10px; color: #6b7280;">总耗时</div>
                         </td>
                     </tr>
                 </table>
@@ -830,7 +868,7 @@ EOF
                 <!-- Progress Bar -->
                 <div style="margin-top: 16px;">
                     <div style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 4px;">
-                        <span>Success Rate</span>
+                        <span>成功率</span>
                         <span>${successRateVal}%</span>
                     </div>
                     <div style="height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden;">
@@ -843,25 +881,41 @@ EOF
         <!-- Plugin Table -->
         <tr>
             <td style="padding: 0 24px 24px;">
-                <div style="font-size: 16px; font-weight: 600; color: #1f2937; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">Plugin Details</div>
+                <div style="font-size: 16px; font-weight: 600; color: #1f2937; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">插件构建详情</div>
                 <table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse;">
                     <tr style="background: #f9fafb;">
-                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Plugin</th>
-                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Version</th>
-                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Status</th>
-                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Error</th>
-                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase;">Time</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">插件名称</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">版本</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">状态</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">错误信息</th>
+                        <th style="padding: 10px 12px; text-align: left; font-size: 11px; color: #6b7280; font-weight: 600;">耗时</th>
                     </tr>
                     ${emailPluginRows}
                 </table>
             </td>
         </tr>
         
+        <!-- Skipped Plugins Table (if any) -->
+        ${skippedCount > 0 ? '''
+        <tr>
+            <td style="padding: 0 24px 24px;">
+                <div style="font-size: 16px; font-weight: 600; color: #f59e0b; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">⚠️ 配置不完整（已跳过 ''' + skippedCount + ''' 个）</div>
+                <table cellpadding="0" cellspacing="0" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                    <tr style="background: #fef3c7;">
+                        <th style="padding: 8px 12px; text-align: left; font-size: 11px; color: #92400e; font-weight: 600;">插件名称</th>
+                        <th style="padding: 8px 12px; text-align: left; font-size: 11px; color: #92400e; font-weight: 600;">跳过原因</th>
+                    </tr>
+                    ''' + skippedPluginRows + '''
+                </table>
+            </td>
+        </tr>
+        ''' : ''}
+        
         <!-- Footer -->
         <tr>
             <td style="background: #f9fafb; padding: 16px; text-align: center;">
-                <a href="${env.BUILD_URL}" style="display: inline-block; background: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500;">View Build Log</a>
-                <p style="margin: 12px 0 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI - Yuezhuo Plugin Build System</p>
+                <a href="${env.BUILD_URL}" style="display: inline-block; background: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500;">查看完整构建日志</a>
+                <p style="margin: 12px 0 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI - Yuezhuo 插件构建系统</p>
             </td>
         </tr>
     </table>
