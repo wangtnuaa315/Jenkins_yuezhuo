@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>主工程质量报告 Demo - 新样式</title>
+    <style>
+        body {
+            background: #f3f4f6;
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px 12px 0 0;
+        }
+
+        .content {
+            background: white;
+            padding: 20px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .footer {
+            background: #f9fafb;
+            padding: 16px;
+            text-align: center;
+            border-radius: 0 0 12px 12px;
+            border: 1px solid #e5e7eb;
+            border-top: none;
+        }
+
+        .stat-box {
+            display: inline-block;
+            text-align: center;
+            padding: 16px 24px;
+            margin: 4px;
+            border-radius: 8px;
+            min-width: 80px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        .check-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .check-name {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .check-detail {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+
+        .badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge-danger {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .badge-skip {
+            background: #f3f4f6;
+            color: #6b7280;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #7c3aed;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            margin: 4px;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+        }
+
+        .reference {
+            background: #eff6ff;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #1e40af;
+            margin-top: 16px;
+        }
+
+        .demo-label {
+            max-width: 600px;
+            margin: 0 auto 16px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .demo-label-fail {
+            background: #fef2f2;
+            border: 1px solid #ef4444;
+            color: #991b1b;
+        }
+
+        .demo-label-success {
+            background: #f0fdf4;
+            border: 1px solid #10b981;
+            color: #065f46;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Demo 1: 有问题时的样式 -->
+    <div class="demo-label demo-label-fail">
+        <strong>💡 Demo 1：</strong> 有 ESLint 错误 + TypeScript 错误 + 安全警告的情况
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1 style="margin: 0; font-size: 20px;">❌ 代码质量报告</h1>
+            <p style="margin: 8px 0 0; opacity: 0.9; font-size: 13px;">构建 #16 • Yuezhuo-main-QualityCheck • 2026-02-06
+                15:20:00</p>
+            <p style="margin: 4px 0 0; opacity: 0.8; font-size: 12px;">📦 develop (a1b2c3d)</p>
+        </div>
+
+        <div class="content">
+            <!-- 统计数据 -->
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div class="stat-box" style="background: #fee2e2;">
+                    <div class="stat-value" style="color: #ef4444;">12</div>
+                    <div class="stat-label">ESLint 错误</div>
+                </div>
+                <div class="stat-box" style="background: #fef3c7;">
+                    <div class="stat-value" style="color: #f59e0b;">8</div>
+                    <div class="stat-label">ESLint 警告</div>
+                </div>
+                <div class="stat-box" style="background: #fee2e2;">
+                    <div class="stat-value" style="color: #ef4444;">5</div>
+                    <div class="stat-label">类型错误</div>
+                </div>
+                <div class="stat-box" style="background: #d1fae5;">
+                    <div class="stat-value" style="color: #10b981;">0</div>
+                    <div class="stat-label">高危漏洞</div>
+                </div>
+            </div>
+
+            <!-- 检查项列表 -->
+            <div class="check-item">
+                <div>
+                    <div class="check-name">ESLint 代码规范</div>
+                    <div class="check-detail">12 错误, 8 警告, 耗时 3.2s</div>
+                </div>
+                <span class="badge badge-danger">✗ 错误</span>
+            </div>
+
+            <div class="check-item">
+                <div>
+                    <div class="check-name">TypeScript 类型检查</div>
+                    <div class="check-detail">5 个类型错误, 耗时 15.8s</div>
+                </div>
+                <span class="badge badge-danger">✗ 错误</span>
+            </div>
+
+            <div class="check-item">
+                <div>
+                    <div class="check-name">依赖安全扫描</div>
+                    <div class="check-detail">0 严重, 0 高危, 3 中危, 12 低危</div>
+                </div>
+                <span class="badge badge-warning">⚠ 漏洞</span>
+            </div>
+
+            <div class="reference">
+                <strong>📊 参考范围:</strong> ESLint 错误=0 为通过 | 类型错误=0 为通过 | 高危漏洞=0 为通过
+            </div>
+
+            <!-- 操作按钮 -->
+            <div style="margin-top: 20px; text-align: center;">
+                <a href="#" class="btn">查看完整报告 →</a>
+                <a href="#eslint-detail" class="btn btn-secondary">📄 ESLint 详情</a>
+                <a href="#tsc-detail" class="btn btn-secondary">📄 类型详情</a>
+                <a href="#security-detail" class="btn btn-secondary">🛡️ 漏洞详情</a>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p style="margin: 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI • Yuezhuo 主工程质量检查</p>
+        </div>
+    </div>
+
+    <br><br>
+
+    <!-- Demo 2: 全部通过的样式 -->
+    <div class="demo-label demo-label-success">
+        <strong>✅ Demo 2：</strong> 全部检查通过的情况
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1 style="margin: 0; font-size: 20px;">✅ 代码质量报告</h1>
+            <p style="margin: 8px 0 0; opacity: 0.9; font-size: 13px;">构建 #17 • Yuezhuo-main-QualityCheck • 2026-02-06
+                16:00:00</p>
+            <p style="margin: 4px 0 0; opacity: 0.8; font-size: 12px;">📦 develop (e4f5g6h)</p>
+        </div>
+
+        <div class="content">
+            <!-- 统计数据 -->
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div class="stat-box" style="background: #d1fae5;">
+                    <div class="stat-value" style="color: #10b981;">0</div>
+                    <div class="stat-label">ESLint 错误</div>
+                </div>
+                <div class="stat-box" style="background: #d1fae5;">
+                    <div class="stat-value" style="color: #10b981;">0</div>
+                    <div class="stat-label">ESLint 警告</div>
+                </div>
+                <div class="stat-box" style="background: #d1fae5;">
+                    <div class="stat-value" style="color: #10b981;">0</div>
+                    <div class="stat-label">类型错误</div>
+                </div>
+                <div class="stat-box" style="background: #d1fae5;">
+                    <div class="stat-value" style="color: #10b981;">0</div>
+                    <div class="stat-label">高危漏洞</div>
+                </div>
+            </div>
+
+            <!-- 检查项列表 -->
+            <div class="check-item">
+                <div>
+                    <div class="check-name">ESLint 代码规范</div>
+                    <div class="check-detail">0 错误, 0 警告, 耗时 3.5s</div>
+                </div>
+                <span class="badge badge-success">✓ 通过</span>
+            </div>
+
+            <div class="check-item">
+                <div>
+                    <div class="check-name">TypeScript 类型检查</div>
+                    <div class="check-detail">0 个类型错误, 耗时 16.2s</div>
+                </div>
+                <span class="badge badge-success">✓ 通过</span>
+            </div>
+
+            <div class="check-item">
+                <div>
+                    <div class="check-name">依赖安全扫描</div>
+                    <div class="check-detail">0 严重, 0 高危, 0 中危, 5 低危</div>
+                </div>
+                <span class="badge badge-success">✓ 通过</span>
+            </div>
+
+            <div class="reference">
+                <strong>📊 参考范围:</strong> ESLint 错误=0 为通过 | 类型错误=0 为通过 | 高危漏洞=0 为通过
+            </div>
+
+            <!-- 操作按钮 -->
+            <div style="margin-top: 20px; text-align: center;">
+                <a href="#" class="btn">查看完整报告 →</a>
+                <a href="#" class="btn btn-secondary">📄 ESLint 详情</a>
+                <a href="#" class="btn btn-secondary">📄 类型详情</a>
+                <a href="#" class="btn btn-secondary">🛡️ 漏洞详情</a>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p style="margin: 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI • Yuezhuo 主工程质量检查</p>
+        </div>
+    </div>
+
+    <br><br>
+
+    <!-- 详情文件示例 -->
+    <div class="demo-label" style="background: #f3f4f6; border: 1px solid #9ca3af; color: #374151;">
+        <strong>📄 详情文件示例：</strong> 点击"ESLint 详情"按钮后看到的 eslint-report.txt 内容
+    </div>
+
+    <div class="container">
+        <pre
+            style="background: #1f2937; color: #e5e7eb; padding: 20px; border-radius: 8px; font-family: 'Consolas', monospace; font-size: 12px; overflow-x: auto; white-space: pre-wrap;">======================================================================
+ESLint 代码检查详细报告
+======================================================================
+
+统计: 12 个错误, 8 个警告, 5 个文件有问题
+
+--- 错误列表 ---
+[E] core/src/utils.ts:15 - Missing semicolon (semi)
+[E] core/src/utils.ts:28 - 'lodash' is defined but never used (no-unused-vars)
+[E] core/src/api.ts:42 - Unexpected console statement (no-console)
+[E] plugins/src/index.ts:18 - 'any' is not allowed as a type (@typescript-eslint/no-explicit-any)
+[E] plugins/src/index.ts:25 - Expected indentation of 4 spaces but found 2 (indent)
+[E] app/src/main.tsx:8 - Unexpected empty function (@typescript-eslint/no-empty-function)
+...
+
+--- 警告列表 ---
+[W] core/src/utils.ts:52 - Prefer const over let (prefer-const)
+[W] core/src/api.ts:67 - Missing return type on function (@typescript-eslint/explicit-function-return-type)
+...</pre>
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,708 @@
+/**
+ * ============================================================================
+ * Yuezhuo 主工程代码质量检查任务
+ * ============================================================================
+ * 
+ * 【功能说明】
+ * - 对主工程代码进行质量检查（ESLint、类型检查、安全审计）
+ * - 生成详细报告文件并归档
+ * - 发送邮件通知（含详情链接）
+ * - 独立运行，不需要先执行构建任务
+ * 
+ * 【依赖关系】
+ * - 无依赖，可独立运行
+ * 
+ * 【运行频率】
+ * - 日常代码质量检查，可频繁运行
+ * 
+ * 【输出】
+ * - eslint-report.txt: ESLint 详细报告
+ * - tsc-report.txt: TypeScript 类型检查报告
+ * - security-report.txt: 安全审计报告
+ * - 质量检查报告邮件（含详情链接）
+ * 
+ * 【维护信息】
+ * 创建时间：2026-02-06
+ * ============================================================================
+ */
+
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'YUEZHUO_BRANCH',
+            defaultValue: 'develop',
+            description: '主工程分支'
+        )
+        string(
+            name: 'EMAIL_RECIPIENTS',
+            defaultValue: 'wangting@huaiye.com.cn',
+            description: '邮件收件人（多个用逗号分隔）'
+        )
+        booleanParam(
+            name: 'RUN_ESLINT',
+            defaultValue: true,
+            description: '运行 ESLint 检查'
+        )
+        booleanParam(
+            name: 'RUN_TYPE_CHECK',
+            defaultValue: true,
+            description: '运行 TypeScript 类型检查'
+        )
+        booleanParam(
+            name: 'RUN_SECURITY_AUDIT',
+            defaultValue: true,
+            description: '运行依赖安全审计'
+        )
+    }
+
+    environment {
+        // 共享工作目录
+        SHARED_WORKSPACE = '/mnt/sdb3/yuezhuo-workspace'
+        YUEZHUO_DIR = "${SHARED_WORKSPACE}/yuezhuo"
+        YUEZHUO_REPO = 'http://192.168.1.6:9000/innovation/yuezhuo.git'
+        GIT_CREDENTIALS = 'yuezhuo-git-credentials'
+    }
+
+    stages {
+        stage('环境检查') {
+            steps {
+                script {
+                    sh '''
+                        echo "======== 环境信息 ========"
+                        echo "Node: $(hostname)"
+                        echo "Node.js: $(node -v)"
+                        echo "Yarn: $(yarn -v)"
+                        echo "分支: ''' + params.YUEZHUO_BRANCH + '''"
+                        echo "========================="
+                    '''
+                }
+            }
+        }
+
+        stage('检查代码仓库') {
+            steps {
+                script {
+                    // 检查代码仓库是否存在
+                    def repoExists = sh(
+                        script: "test -d ${YUEZHUO_DIR}/.git && echo 'yes' || echo 'no'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (repoExists == 'yes') {
+                        // 仓库已存在，使用凭证更新
+                        dir(env.YUEZHUO_DIR) {
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: "*/${params.YUEZHUO_BRANCH}"]],
+                                userRemoteConfigs: [[
+                                    url: env.YUEZHUO_REPO,
+                                    credentialsId: env.GIT_CREDENTIALS
+                                ]]
+                            ])
+                        }
+                        echo "代码仓库已更新到 ${params.YUEZHUO_BRANCH} 分支"
+                    } else {
+                        // 仓库不存在，克隆
+                        echo "代码仓库不存在，正在克隆..."
+                        sh "mkdir -p ${SHARED_WORKSPACE}"
+                        dir(env.SHARED_WORKSPACE) {
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: "*/${params.YUEZHUO_BRANCH}"]],
+                                extensions: [[
+                                    $class: 'RelativeTargetDirectory',
+                                    relativeTargetDir: 'yuezhuo'
+                                ]],
+                                userRemoteConfigs: [[
+                                    url: env.YUEZHUO_REPO,
+                                    credentialsId: env.GIT_CREDENTIALS
+                                ]]
+                            ])
+                        }
+                        echo "代码仓库克隆完成"
+                    }
+                }
+            }
+        }
+
+        stage('安装依赖') {
+            steps {
+                script {
+                    dir(env.YUEZHUO_DIR) {
+                        // 检查 node_modules 是否存在，不存在则安装
+                        def hasNodeModules = sh(
+                            script: "test -d node_modules && echo 'yes' || echo 'no'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (hasNodeModules == 'no') {
+                            echo "node_modules 不存在，正在安装依赖..."
+                            sh 'yarn install --frozen-lockfile'
+                        } else {
+                            echo "node_modules 已存在，跳过安装"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('获取代码信息') {
+            steps {
+                script {
+                    dir(env.YUEZHUO_DIR) {
+                        env.COMMIT_HASH = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        env.COMMIT_SHORT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        env.CURRENT_BRANCH = sh(script: 'git branch --show-current || git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                        
+                        echo """
+                        ========================================
+                        代码信息：
+                        - 分支: ${env.CURRENT_BRANCH}
+                        - Commit: ${env.COMMIT_SHORT}
+                        ========================================
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('ESLint 检查') {
+            when {
+                expression { params.RUN_ESLINT == true }
+            }
+            steps {
+                script {
+                    def startTime = System.currentTimeMillis()
+                    
+                    dir(env.YUEZHUO_DIR) {
+                        // 使用项目自带的 lint 命令，避免路径匹配问题
+                        sh '''
+                            # 超时 10 分钟，使用项目自带的 lint 命令
+                            # 如果项目有 yarn lint 命令则使用，否则直接运行 eslint
+                            if yarn run --non-interactive lint --help > /dev/null 2>&1; then
+                                timeout 600 yarn lint > "${WORKSPACE}/eslint-output.txt" 2>&1 || true
+                            else
+                                # 回退方案：直接扫描 packages 和 src 目录
+                                timeout 600 yarn eslint . \
+                                    --ext .ts,.tsx,.js,.jsx \
+                                    --ignore-pattern "node_modules" \
+                                    --ignore-pattern "dist" \
+                                    --ignore-pattern "lib" \
+                                    --ignore-pattern "es" \
+                                    --ignore-pattern "*.d.ts" \
+                                    --format stylish > "${WORKSPACE}/eslint-output.txt" 2>&1 || true
+                            fi
+                            
+                            # 使用 Python 生成报告（UTF-8 with BOM，解决中文乱码）
+                            python3 << 'PYTHON_SCRIPT'
+import os
+import re
+
+workspace = os.environ.get('WORKSPACE', '/tmp')
+input_file = os.path.join(workspace, 'eslint-output.txt')
+output_file = os.path.join(workspace, 'eslint-report.txt')
+NL = chr(10)
+
+try:
+    with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read()
+    
+    # 统计错误和警告数量
+    error_count = len(re.findall(r' error ', content))
+    warn_count = len(re.findall(r' warning ', content))
+    
+    # 生成报告文件（UTF-8 with BOM）
+    with open(output_file, 'w', encoding='utf-8-sig') as out:
+        out.write('=' * 70 + NL)
+        out.write('ESLint 代码检查详细报告' + NL)
+        out.write('=' * 70 + NL + NL)
+        out.write('统计: {} 个错误, {} 个警告'.format(error_count, warn_count) + NL + NL)
+        
+        # 追加完整原始输出
+        out.write('--- 详细输出 ---' + NL)
+        for line in content.splitlines():
+            out.write(line + NL)
+    
+    print('ESLINT_ERRORS={}'.format(error_count))
+    print('ESLINT_WARNINGS={}'.format(warn_count))
+
+except Exception as ex:
+    print('ESLINT_ERRORS=0')
+    print('ESLINT_WARNINGS=0')
+    with open(output_file, 'w', encoding='utf-8-sig') as out:
+        out.write('ESLint 检查执行失败: {}'.format(str(ex)) + NL)
+PYTHON_SCRIPT
+                        '''
+                    }
+                    
+                    // 从 stylish 输出解析统计
+                    def errors = 0
+                    def warnings = 0
+                    try {
+                        def statsOutput = sh(script: '''
+                            grep -oE "[0-9]+ errors?" ${WORKSPACE}/eslint-output.txt | head -1 | grep -oE "[0-9]+" || echo "0"
+                        ''', returnStdout: true).trim()
+                        errors = statsOutput.toInteger()
+                        
+                        def warnOutput = sh(script: '''
+                            grep -oE "[0-9]+ warnings?" ${WORKSPACE}/eslint-output.txt | head -1 | grep -oE "[0-9]+" || echo "0"
+                        ''', returnStdout: true).trim()
+                        warnings = warnOutput.toInteger()
+                    } catch (Exception e) {
+                        echo "解析 ESLint 结果失败: ${e.message}"
+                    }
+                    
+                    def eslintDuration = (System.currentTimeMillis() - startTime) / 1000
+                    def eslintResult = errors > 0 ? 'failed' : (warnings > 0 ? 'warning' : 'success')
+                    
+                    env.ESLINT_RESULT = eslintResult
+                    env.ESLINT_ERRORS = errors.toString()
+                    env.ESLINT_WARNINGS = warnings.toString()
+                    env.ESLINT_DURATION = eslintDuration.toString()
+                    
+                    echo """
+                    ========================================
+                    ESLint 检查结果: ${eslintResult}
+                    - 错误: ${errors}
+                    - 警告: ${warnings}
+                    - 耗时: ${eslintDuration}s
+                    ========================================
+                    """
+                }
+            }
+        }
+
+        stage('TypeScript 类型检查') {
+            when {
+                expression { params.RUN_TYPE_CHECK == true }
+            }
+            steps {
+                script {
+                    def startTime = System.currentTimeMillis()
+                    
+                    dir(env.YUEZHUO_DIR) {
+                        // 执行类型检查并生成报告
+                        sh '''
+                            set +e  # 禁用错误退出，确保类型错误不会导致构建失败
+                            # 执行 tsc 并捕获输出到 WORKSPACE 目录
+                            yarn tsc --noEmit > "${WORKSPACE}/tsc-output.txt" 2>&1 || true
+                            set -e
+                            
+                            # 使用 Python 生成报告（使用 os.environ 获取 WORKSPACE）
+                            python3 << 'PYTHON_SCRIPT'
+import os
+
+workspace = os.environ.get('WORKSPACE', '/tmp')
+input_file = os.path.join(workspace, 'tsc-output.txt')
+output_file = os.path.join(workspace, 'tsc-report.txt')
+NL = chr(10)  # 换行符
+
+try:
+    with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read()
+    
+    # 解析错误
+    errors = []
+    for line in content.splitlines():
+        if 'error TS' in line:
+            errors.append(line.strip())
+    
+    # 生成报告文件（UTF-8 with BOM）
+    with open(output_file, 'w', encoding='utf-8-sig') as out:
+        out.write('=' * 70 + NL)
+        out.write('TypeScript 类型检查详细报告' + NL)
+        out.write('=' * 70 + NL + NL)
+        out.write('统计: {} 个类型错误'.format(len(errors)) + NL + NL)
+        
+        if errors:
+            out.write('--- 错误列表（共 {} 条）---'.format(len(errors)) + NL)
+            for i, e in enumerate(errors, 1):
+                out.write('{}. {}'.format(i, e) + NL)
+        else:
+            out.write(NL + '✅ 没有发现类型错误！' + NL)
+    
+    print('TSC_ERRORS={}'.format(len(errors)))
+
+except Exception as ex:
+    print('TSC_ERRORS=0')
+    with open(output_file, 'w', encoding='utf-8-sig') as out:
+        out.write('TypeScript 检查执行失败: {}'.format(str(ex)) + NL)
+PYTHON_SCRIPT
+                        '''
+                    }
+                    
+                    // 解析结果
+                    def typeErrors = 0
+                    try {
+                        def output = sh(script: "grep -c 'error TS' ${WORKSPACE}/tsc-output.txt || echo '0'", returnStdout: true).trim()
+                        typeErrors = output.toInteger()
+                    } catch (Exception e) {
+                        echo "解析 TSC 结果失败: ${e.message}"
+                    }
+                    
+                    def tscDuration = (System.currentTimeMillis() - startTime) / 1000
+                    def tscResult = typeErrors > 0 ? 'failed' : 'success'
+                    
+                    env.TSC_RESULT = tscResult
+                    env.TSC_ERRORS = typeErrors.toString()
+                    env.TSC_DURATION = tscDuration.toString()
+                    
+                    echo """
+                    ========================================
+                    TypeScript 类型检查结果: ${tscResult}
+                    - 类型错误: ${typeErrors}
+                    - 耗时: ${tscDuration}s
+                    ========================================
+                    """
+                }
+            }
+        }
+
+        stage('依赖安全审计') {
+            when {
+                expression { params.RUN_SECURITY_AUDIT == true }
+            }
+            steps {
+                script {
+                    def startTime = System.currentTimeMillis()
+                    
+                    dir(env.YUEZHUO_DIR) {
+                        sh '''
+                            # 执行安全审计
+                            yarn audit --json > "${WORKSPACE}/audit-output.json" 2>&1 || true
+                            
+                            # 使用 Python 解析并生成报告（使用 os.environ 获取 WORKSPACE）
+                            python3 << 'PYTHON_SCRIPT'
+import json
+import os
+
+workspace = os.environ.get('WORKSPACE', '/tmp')
+input_file = os.path.join(workspace, 'audit-output.json')
+output_file = os.path.join(workspace, 'security-report.txt')
+NL = chr(10)  # 换行符
+
+try:
+    with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read()
+    
+    critical = 0
+    high = 0
+    moderate = 0
+    low = 0
+    vulnerabilities = []
+    
+    for line in content.splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+            if item.get('type') == 'auditAdvisory':
+                data = item.get('data', {}).get('advisory', {})
+                severity = data.get('severity', '')
+                title = data.get('title', 'Unknown')
+                module = data.get('module_name', 'unknown')
+                
+                if severity == 'critical':
+                    critical += 1
+                elif severity == 'high':
+                    high += 1
+                elif severity == 'moderate':
+                    moderate += 1
+                elif severity == 'low':
+                    low += 1
+                
+                vulnerabilities.append({
+                    'severity': severity.upper(),
+                    'module': module,
+                    'title': title[:80]
+                })
+        except:
+            pass
+    
+    # 生成报告文件（UTF-8 with BOM）
+    with open(output_file, 'w', encoding='utf-8-sig') as out:
+        out.write('=' * 70 + NL)
+        out.write('依赖安全审计详细报告' + NL)
+        out.write('=' * 70 + NL + NL)
+        out.write('统计: {} 严重, {} 高危, {} 中危, {} 低危'.format(critical, high, moderate, low) + NL + NL)
+        
+        if vulnerabilities:
+            # 按严重程度排序和分组
+            severity_order = {'CRITICAL': 0, 'HIGH': 1, 'MODERATE': 2, 'LOW': 3}
+            vulnerabilities.sort(key=lambda x: severity_order.get(x['severity'], 99))
+            
+            out.write('--- 漏洞列表（按严重程度排序，共 {} 条）---'.format(len(vulnerabilities)) + NL)
+            
+            # 分类显示所有漏洞
+            current_severity = None
+            count = 0
+            for v in vulnerabilities:
+                if v['severity'] != current_severity:
+                    current_severity = v['severity']
+                    severity_count = len([x for x in vulnerabilities if x['severity'] == current_severity])
+                    out.write(NL + '【{} - {} 条】'.format(current_severity, severity_count) + NL)
+                    count = 0
+                count += 1
+                out.write('  {}. {} - {}'.format(count, v['module'], v['title']) + NL)
+        else:
+            out.write(NL + '✅ 没有发现安全漏洞！' + NL)
+    
+    print('AUDIT_CRITICAL={}'.format(critical))
+    print('AUDIT_HIGH={}'.format(high))
+    print('AUDIT_MODERATE={}'.format(moderate))
+    print('AUDIT_LOW={}'.format(low))
+
+except Exception as ex:
+    print('AUDIT_CRITICAL=0')
+    print('AUDIT_HIGH=0')
+    print('AUDIT_MODERATE=0')
+    print('AUDIT_LOW=0')
+    with open(output_file, 'w', encoding='utf-8-sig') as out:
+        out.write('安全审计执行失败: {}'.format(str(ex)) + NL)
+PYTHON_SCRIPT
+                        '''
+                    }
+                    
+                    // 解析结果
+                    def critical = 0, high = 0, moderate = 0, low = 0
+                    try {
+                        def output = sh(script: '''
+                            python3 -c "
+import json
+import os
+workspace = os.environ.get('WORKSPACE', '/tmp')
+input_file = os.path.join(workspace, 'audit-output.json')
+c=h=m=l=0
+try:
+    with open(input_file, 'r') as f:
+        for line in f:
+            try:
+                item = json.loads(line)
+                if item.get('type') == 'auditAdvisory':
+                    s = item.get('data',{}).get('advisory',{}).get('severity','')
+                    if s=='critical': c+=1
+                    elif s=='high': h+=1
+                    elif s=='moderate': m+=1
+                    elif s=='low': l+=1
+            except: pass
+except: pass
+print('C={} H={} M={} L={}'.format(c,h,m,l))
+"
+                        ''', returnStdout: true).trim()
+                        
+                        def match = (output =~ /C=(\d+) H=(\d+) M=(\d+) L=(\d+)/)
+                        if (match.find()) {
+                            critical = match.group(1).toInteger()
+                            high = match.group(2).toInteger()
+                            moderate = match.group(3).toInteger()
+                            low = match.group(4).toInteger()
+                        }
+                    } catch (Exception e) {
+                        echo "解析安全审计结果失败: ${e.message}"
+                    }
+                    
+                    def auditDuration = (System.currentTimeMillis() - startTime) / 1000
+                    def auditResult = (critical > 0 || high > 0) ? 'failed' : (moderate > 0 ? 'warning' : 'success')
+                    
+                    env.AUDIT_RESULT = auditResult
+                    env.AUDIT_CRITICAL = critical.toString()
+                    env.AUDIT_HIGH = high.toString()
+                    env.AUDIT_MODERATE = moderate.toString()
+                    env.AUDIT_LOW = low.toString()
+                    env.AUDIT_DURATION = auditDuration.toString()
+                    
+                    echo """
+                    ========================================
+                    依赖安全审计结果: ${auditResult}
+                    - 严重: ${critical}
+                    - 高危: ${high}
+                    - 中危: ${moderate}
+                    - 低危: ${low}
+                    - 耗时: ${auditDuration}s
+                    ========================================
+                    """
+                }
+            }
+        }
+
+        stage('归档报告') {
+            steps {
+                script {
+                    // 归档所有报告文件
+                    archiveArtifacts artifacts: 'eslint-report.txt,tsc-report.txt,security-report.txt', allowEmptyArchive: true
+                    echo "报告文件已归档"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def buildTime = new Date().format('yyyy-MM-dd HH:mm:ss')
+                def buildUrl = env.BUILD_URL ?: ''
+                
+                // 确定整体状态
+                def eslintResult = env.ESLINT_RESULT ?: 'skipped'
+                def tscResult = env.TSC_RESULT ?: 'skipped'
+                def auditResult = env.AUDIT_RESULT ?: 'skipped'
+                
+                def overallStatus = 'success'
+                if (eslintResult == 'failed' || tscResult == 'failed' || auditResult == 'failed') {
+                    overallStatus = 'failed'
+                } else if (eslintResult == 'warning' || auditResult == 'warning') {
+                    overallStatus = 'warning'
+                }
+                
+                def statusEmoji = overallStatus == 'success' ? '✅' : (overallStatus == 'warning' ? '⚠️' : '❌')
+                def statusText = overallStatus == 'success' ? '通过' : (overallStatus == 'warning' ? '有警告' : '失败')
+                
+                // 状态图标和颜色
+                def eslintIcon = eslintResult == 'success' ? '✓ 通过' : (eslintResult == 'warning' ? '⚠ 警告' : (eslintResult == 'skipped' ? '⏭ 跳过' : '✗ 错误'))
+                def tscIcon = tscResult == 'success' ? '✓ 通过' : (tscResult == 'skipped' ? '⏭ 跳过' : '✗ 错误')
+                def auditIcon = auditResult == 'success' ? '✓ 通过' : (auditResult == 'warning' ? '⚠ 漏洞' : (auditResult == 'skipped' ? '⏭ 跳过' : '✗ 漏洞'))
+                
+                def eslintBadgeClass = eslintResult == 'success' ? 'badge-success' : (eslintResult == 'warning' ? 'badge-warning' : (eslintResult == 'skipped' ? 'badge-skip' : 'badge-danger'))
+                def tscBadgeClass = tscResult == 'success' ? 'badge-success' : (tscResult == 'skipped' ? 'badge-skip' : 'badge-danger')
+                def auditBadgeClass = auditResult == 'success' ? 'badge-success' : (auditResult == 'warning' ? 'badge-warning' : (auditResult == 'skipped' ? 'badge-skip' : 'badge-danger'))
+                
+                // 发送邮件
+                try {
+                    mail(
+                        to: params.EMAIL_RECIPIENTS ?: 'wangting@huaiye.com.cn',
+                        subject: "${statusEmoji} Yuezhuo 主工程质量检查 #${env.BUILD_NUMBER} - ${statusText}",
+                        mimeType: 'text/html',
+                        body: """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <style>
+        .container { max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .header { background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); color: white; padding: 20px; border-radius: 12px 12px 0 0; }
+        .content { background: white; padding: 20px; border: 1px solid #e5e7eb; }
+        .footer { background: #f9fafb; padding: 16px; text-align: center; border-radius: 0 0 12px 12px; border: 1px solid #e5e7eb; border-top: none; }
+        .stat-box { display: inline-block; text-align: center; padding: 16px 24px; margin: 4px; border-radius: 8px; min-width: 80px; }
+        .stat-value { font-size: 28px; font-weight: bold; }
+        .stat-label { font-size: 11px; color: #6b7280; margin-top: 4px; }
+        .check-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #f3f4f6; }
+        .check-name { font-weight: 600; color: #1f2937; }
+        .check-detail { font-size: 12px; color: #6b7280; margin-top: 2px; }
+        .badge { padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+        .badge-success { background: #d1fae5; color: #065f46; }
+        .badge-warning { background: #fef3c7; color: #92400e; }
+        .badge-danger { background: #fee2e2; color: #991b1b; }
+        .badge-skip { background: #f3f4f6; color: #6b7280; }
+        .btn { display: inline-block; padding: 10px 20px; background: #7c3aed; color: white; text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500; }
+        .btn-secondary { background: #6b7280; margin-left: 8px; }
+        .reference { background: #eff6ff; padding: 12px; border-radius: 6px; font-size: 12px; color: #1e40af; margin-top: 16px; }
+    </style>
+</head>
+<body style="background: #f3f4f6; margin: 0; padding: 20px;">
+    <div class="container">
+        <div class="header">
+            <h1 style="margin: 0; font-size: 20px;">${statusEmoji} 代码质量报告</h1>
+            <p style="margin: 8px 0 0; opacity: 0.9; font-size: 13px;">构建 #${env.BUILD_NUMBER} • ${env.JOB_NAME} • ${buildTime}</p>
+            <p style="margin: 4px 0 0; opacity: 0.8; font-size: 12px;">📦 ${env.CURRENT_BRANCH ?: params.YUEZHUO_BRANCH} (${env.COMMIT_SHORT ?: 'N/A'})</p>
+        </div>
+        
+        <div class="content">
+            <!-- 统计数据 -->
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div class="stat-box" style="background: ${(env.ESLINT_ERRORS?.toInteger() ?: 0) > 0 ? '#fee2e2' : '#d1fae5'};">
+                    <div class="stat-value" style="color: ${(env.ESLINT_ERRORS?.toInteger() ?: 0) > 0 ? '#ef4444' : '#10b981'};">${env.ESLINT_ERRORS ?: '0'}</div>
+                    <div class="stat-label">ESLint 错误</div>
+                </div>
+                <div class="stat-box" style="background: ${(env.ESLINT_WARNINGS?.toInteger() ?: 0) > 0 ? '#fef3c7' : '#d1fae5'};">
+                    <div class="stat-value" style="color: ${(env.ESLINT_WARNINGS?.toInteger() ?: 0) > 0 ? '#f59e0b' : '#10b981'};">${env.ESLINT_WARNINGS ?: '0'}</div>
+                    <div class="stat-label">ESLint 警告</div>
+                </div>
+                <div class="stat-box" style="background: ${(env.TSC_ERRORS?.toInteger() ?: 0) > 0 ? '#fee2e2' : '#d1fae5'};">
+                    <div class="stat-value" style="color: ${(env.TSC_ERRORS?.toInteger() ?: 0) > 0 ? '#ef4444' : '#10b981'};">${env.TSC_ERRORS ?: '0'}</div>
+                    <div class="stat-label">类型错误</div>
+                </div>
+                <div class="stat-box" style="background: ${((env.AUDIT_CRITICAL?.toInteger() ?: 0) + (env.AUDIT_HIGH?.toInteger() ?: 0)) > 0 ? '#fee2e2' : '#d1fae5'};">
+                    <div class="stat-value" style="color: ${((env.AUDIT_CRITICAL?.toInteger() ?: 0) + (env.AUDIT_HIGH?.toInteger() ?: 0)) > 0 ? '#ef4444' : '#10b981'};">${(env.AUDIT_CRITICAL?.toInteger() ?: 0) + (env.AUDIT_HIGH?.toInteger() ?: 0)}</div>
+                    <div class="stat-label">高危漏洞</div>
+                </div>
+            </div>
+            
+            <!-- 检查项列表 -->
+            <div class="check-item">
+                <div>
+                    <div class="check-name">ESLint 代码规范</div>
+                    <div class="check-detail">${env.ESLINT_ERRORS ?: '0'} 错误, ${env.ESLINT_WARNINGS ?: '0'} 警告, 耗时 ${env.ESLINT_DURATION ?: '0'}s</div>
+                </div>
+                <span class="badge ${eslintBadgeClass}">${eslintIcon}</span>
+            </div>
+            
+            <div class="check-item">
+                <div>
+                    <div class="check-name">TypeScript 类型检查</div>
+                    <div class="check-detail">${env.TSC_ERRORS ?: '0'} 个类型错误, 耗时 ${env.TSC_DURATION ?: '0'}s</div>
+                </div>
+                <span class="badge ${tscBadgeClass}">${tscIcon}</span>
+            </div>
+            
+            <div class="check-item">
+                <div>
+                    <div class="check-name">依赖安全扫描</div>
+                    <div class="check-detail">${env.AUDIT_CRITICAL ?: '0'} 严重, ${env.AUDIT_HIGH ?: '0'} 高危, ${env.AUDIT_MODERATE ?: '0'} 中危, ${env.AUDIT_LOW ?: '0'} 低危</div>
+                </div>
+                <span class="badge ${auditBadgeClass}">${auditIcon}</span>
+            </div>
+            
+            <div class="reference">
+                <strong>📊 参考范围:</strong> ESLint 错误=0 为通过 | 类型错误=0 为通过 | 高危漏洞=0 为通过
+            </div>
+            
+            <!-- 操作按钮 -->
+            <div style="margin-top: 20px;">
+                <a href="${buildUrl}" class="btn">查看完整报告 →</a>
+                <a href="${buildUrl}artifact/eslint-report.txt" class="btn btn-secondary">📄 ESLint 详情</a>
+                <a href="${buildUrl}artifact/tsc-report.txt" class="btn btn-secondary">📄 类型详情</a>
+                <a href="${buildUrl}artifact/security-report.txt" class="btn btn-secondary">🛡️ 漏洞详情</a>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p style="margin: 0; font-size: 11px; color: #9ca3af;">Generated by Jenkins CI • Yuezhuo 主工程质量检查</p>
+        </div>
+    </div>
+</body>
+</html>
+                        """
+                    )
+                    echo "邮件发送成功"
+                } catch (Exception e) {
+                    echo "邮件发送失败: ${e.message}"
+                }
+            }
+        }
+        success {
+            echo """
+            ========================================
+            ✅ 代码质量检查完成！
+            ========================================
+            分支: ${env.CURRENT_BRANCH}
+            Commit: ${env.COMMIT_SHORT}
+            ESLint: ${env.ESLINT_RESULT ?: 'skipped'}
+            TypeScript: ${env.TSC_RESULT ?: 'skipped'}
+            安全审计: ${env.AUDIT_RESULT ?: 'skipped'}
+            ========================================
+            """
+        }
+        failure {
+            echo """
+            ========================================
+            ❌ 代码质量检查失败！
+            ========================================
+            请检查控制台日志获取详细错误信息。
+            ========================================
+            """
+        }
+    }
+}
