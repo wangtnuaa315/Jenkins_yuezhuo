@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ============================================================================
  * Yuezhuo 插件打包任务
  * ============================================================================
@@ -43,10 +43,10 @@ pipeline {
                 script: [
                     sandbox: false,
                     script: '''
-                        def pluginsDir = new File("/mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins/@huaiye")
+                        def pluginsDir = new File("/mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins")
                         if (pluginsDir.exists()) {
                             def plugins = pluginsDir.listFiles()
-                                .findAll { it.isDirectory() }
+                                .findAll { it.isDirectory() && !it.name.startsWith('.') && !it.name.startsWith('@') }
                                 .collect { it.name }
                                 .sort()
                             return plugins
@@ -165,7 +165,7 @@ pipeline {
                     if (params.BUILD_ALL) {
                         // 打包所有插件
                         def plugins = sh(
-                            script: "ls -1 ${PLUGINS_DIR}/@huaiye/ 2>/dev/null | sort",
+                            script: "ls -1 ${PLUGINS_DIR}/ 2>/dev/null | grep -v '^[.@]' | sort",
                             returnStdout: true
                         ).trim()
                         pluginList = plugins.split('\n').toList()
@@ -209,7 +209,7 @@ pipeline {
                         sh """
                             echo "拷贝: ${plugin}"
                             rm -rf ${YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}
-                            cp -r ${PLUGINS_DIR}/@huaiye/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
+                            cp -r ${PLUGINS_DIR}/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
                         """
                     }
                     
