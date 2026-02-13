@@ -30,20 +30,48 @@ pipeline {
                 script: [
                     sandbox: false,
                     script: '''
-                        def pluginsDir = new File("/mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins/@huaiye")
-                        if (pluginsDir.exists()) {
-                            def plugins = pluginsDir.listFiles()
-                                .findAll { it.isDirectory() }
-                                .collect { it.name }
-                                .sort()
-                            return plugins
+                        def pluginsDir = "/mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins"
+                        try {
+                            // 方式1: 使用 shell 命令发现插件目录
+                            def proc = ["bash", "-c", "find ${pluginsDir} -maxdepth 1 -mindepth 1 -type d ! -name '.*' ! -name '@*' -printf '%f\n' | sort"].execute()
+                            proc.waitFor()
+                            def output = proc.text.trim()
+                            if (proc.exitValue() == 0 && output) {
+                                return output.split("\\n").toList()
+                            }
+                        } catch (Exception e) {
+                            // 忽略异常，尝试方式2
                         }
-                        return ["插件目录不存在，请先运行主工程构建"]
+                        try {
+                            // 方式2: 使用 File API
+                            def dir = new File(pluginsDir)
+                            if (dir.exists()) {
+                                def plugins = dir.listFiles()
+                                    .findAll { it.isDirectory() && !it.name.startsWith('.') && !it.name.startsWith('@') }
+                                    .collect { it.name }
+                                    .sort()
+                                if (plugins) return plugins
+                            }
+                        } catch (Exception e) {
+                            // 忽略异常
+                        }
+                        return ["插件目录不存在或无法访问，请先运行主工程构建"]
                     '''
                 ],
                 fallbackScript: [
                     sandbox: false,
-                    script: 'return ["plugin-message-queue"]'
+                    script: '''
+                        // fallback: 尝试用 shell 发现插件
+                        try {
+                            def proc = ["bash", "-c", "find /mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins -maxdepth 1 -mindepth 1 -type d ! -name '.*' ! -name '@*' -printf '%f\n' | sort"].execute()
+                            proc.waitFor()
+                            def output = proc.text.trim()
+                            if (proc.exitValue() == 0 && output) {
+                                return output.split("\\n").toList()
+                            }
+                        } catch (Exception ignore) {}
+                        return ["plugin-message-queue"]
+                    '''
                 ]
             ]
         )
@@ -199,7 +227,7 @@ pipeline {
                     
                     if (params.BUILD_ALL) {
                         def plugins = sh(
-                            script: "ls -1 ${PLUGINS_DIR}/@huaiye/ 2>/dev/null | sort",
+                            script: "ls -1 ${PLUGINS_DIR}/ 2>/dev/null | grep -v '^[.@]' | sort",
                             returnStdout: true
                         ).trim()
                         pluginList = plugins.split('\n').toList()
@@ -243,7 +271,7 @@ pipeline {
                         sh """
                             echo "拷贝: ${plugin}"
                             rm -rf ${YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}
-                            cp -r ${PLUGINS_DIR}/@huaiye/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
+                            cp -r ${PLUGINS_DIR}/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
                         """
                     }
                     

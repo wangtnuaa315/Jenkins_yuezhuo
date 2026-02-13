@@ -36,10 +36,10 @@ pipeline {
                 script: [
                     sandbox: false,
                     script: '''
-                        def pluginsDir = new File("/mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins/@huaiye")
+                        def pluginsDir = new File("/mnt/sdb3/yuezhuo-workspace/yuezhuo-plugins")
                         if (pluginsDir.exists()) {
                             def plugins = pluginsDir.listFiles()
-                                .findAll { it.isDirectory() }
+                                .findAll { it.isDirectory() && !it.name.startsWith('.') && !it.name.startsWith('@') }
                                 .collect { it.name }
                                 .sort()
                             return plugins
@@ -159,7 +159,7 @@ pipeline {
                     
                     if (params.BUILD_ALL) {
                         def plugins = sh(
-                            script: "ls -1 ${PLUGINS_DIR}/@huaiye/ 2>/dev/null | sort",
+                            script: "find ${PLUGINS_DIR} -maxdepth 1 -mindepth 1 -type d -name 'plugin-*' -printf '%f\n' | sort",
                             returnStdout: true
                         ).trim()
                         pluginList = plugins.split('\n').toList()
@@ -202,7 +202,7 @@ pipeline {
                         sh """
                             echo "拷贝: ${plugin}"
                             rm -rf ${YUEZHUO_DIR}/packages/plugins/@huaiye/${plugin}
-                            cp -r ${PLUGINS_DIR}/@huaiye/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
+                            cp -r ${PLUGINS_DIR}/${plugin} ${YUEZHUO_DIR}/packages/plugins/@huaiye/
                         """
                     }
                     
